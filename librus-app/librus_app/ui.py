@@ -1,4 +1,4 @@
-"""Polish, local-first desktop UI for Szkolny Panel.
+"""Polish, local-first desktop UI for LibrusApp.
 
 Only the main Tk thread touches widgets. Network and persistence operations
 belong to the controller; the UI receives their results through its queue.
@@ -382,7 +382,7 @@ class SchoolPanelApp:
     def __init__(self, controller: Any, *, restore: bool = True) -> None:
         self.controller = controller
         self.root = tk.Tk()
-        self.root.title(f"Szkolny Panel {__version__}")
+        self.root.title(f"LibrusApp {__version__}")
         self.root.geometry("1240x850")
         self.root.minsize(1080, 720)
         self.root.configure(bg=BG)
@@ -451,8 +451,8 @@ class SchoolPanelApp:
         sidebar.pack_propagate(False)
         brand = tk.Frame(sidebar, bg=SIDEBAR)
         brand.pack(fill="x", padx=22, pady=(31, 34))
-        tk.Label(brand, text="SP", bg=TEAL, fg=WHITE, font=("Segoe UI", 13, "bold"), padx=10, pady=6).pack(anchor="w")
-        tk.Label(brand, text="Szkolny Panel", bg=SIDEBAR, fg=WHITE, font=("Segoe UI", 17, "bold")).pack(anchor="w", pady=(12, 1))
+        tk.Label(brand, text="LA", bg=TEAL, fg=WHITE, font=("Segoe UI", 13, "bold"), padx=10, pady=6).pack(anchor="w")
+        tk.Label(brand, text="LibrusApp", bg=SIDEBAR, fg=WHITE, font=("Segoe UI", 17, "bold")).pack(anchor="w", pady=(12, 1))
         tk.Label(brand, text="Dziennik pod ręką", bg=SIDEBAR, fg=SIDEBAR_MUTED, font=("Segoe UI", 9)).pack(anchor="w")
         for key, (title, _) in PAGES.items():
             if key == "settings":
@@ -818,7 +818,7 @@ class SchoolPanelApp:
             sync_text += f"\nNastępny: {_when(state['next_sync'])}"
         self.sync_label.configure(text=sync_text)
         modes = {"idle": "Konto niepołączone", "demo": "Dane demonstracyjne", "live": "Konto połączone", "offline": "Dane z lokalnej kopii"}
-        self.sidebar_mode.configure(text=modes.get(mode, "Szkolny Panel"))
+        self.sidebar_mode.configure(text=modes.get(mode, "LibrusApp"))
         self.account_status.configure(text=modes.get(mode, "") + (". Dane demonstracyjne nie pochodzą z konta w szkole." if mode == "demo" else "."))
         global_errors = [str(state.get("errors", {}).get(key, "")) for key in ("connection", "storage")]
         if any(global_errors):

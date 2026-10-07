@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from librus_apix.client import Client, Token
 
-from szkolny_panel import connector as c
-from szkolny_panel.data import KINDS, SnapshotTracker, demo_sections
+from librus_app import connector as c
+from librus_app.data import KINDS, SnapshotTracker, demo_sections
 from test_connector import prepared_connector
 from test_core import connect, make_controller, refresh
 
@@ -145,7 +145,7 @@ def test_older_snapshot_establishes_quiet_announcement_baseline():
 
 def test_open_announcement_uses_fixed_official_section(monkeypatch):
     urls = []
-    monkeypatch.setattr("szkolny_panel.core.webbrowser.open", urls.append)
+    monkeypatch.setattr("librus_app.core.webbrowser.open", urls.append)
     controller, _ = make_controller()
     try:
         connect(controller)

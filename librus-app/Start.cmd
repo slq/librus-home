@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" goto dependencies
 
-echo Szkolny Panel - przygotowanie srodowiska przy pierwszym uruchomieniu.
+echo LibrusApp - przygotowanie srodowiska przy pierwszym uruchomieniu.
 where py >nul 2>nul
 if not errorlevel 1 goto pythonlauncher
 where python >nul 2>nul
@@ -28,7 +28,7 @@ if errorlevel 1 goto failure
 type nul > ".venv\panel-deps-0.1.0.ok"
 
 :run
-start "" ".venv\Scripts\pythonw.exe" -m szkolny_panel %*
+start "" ".venv\Scripts\pythonw.exe" -m librus_app %*
 exit /b 0
 
 :nopython

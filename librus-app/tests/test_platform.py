@@ -7,8 +7,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from szkolny_panel.platform_windows import (
+from librus_app.platform_windows import (
     SecureStorage, StorageError, _MAGIC, _TOAST_SCRIPT,
     _powershell_path, _send_toast, _toast_payload, notify,
 )
@@ -39,6 +40,33 @@ class PlatformStorageTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
+
+    def test_default_directory_preserves_legacy_account_and_prefers_new_state(self):
+        with patch("librus_app.platform_windows.sys.platform", "win32"), patch.dict(
+            "os.environ", {"LOCALAPPDATA": str(self.directory)}
+        ):
+            self.assertEqual(SecureStorage().base_dir, self.directory / "LibrusApp")
+            legacy = FakePersistentStorage(self.directory / "SzkolnyPanel")
+            legacy.save({"sample": "legacy-account", "reminders": ["test-only"]})
+            legacy_bytes = legacy.path().read_bytes()
+            restored = SecureStorage()
+            restored._protector = FakeProtector()
+            self.assertEqual(restored.base_dir, legacy.base_dir)
+            self.assertEqual(restored.load(), legacy.load())
+            restored.save({"sample": "updated-account"})
+            self.assertEqual(legacy.load(), {"sample": "updated-account"})
+            restored.clear()
+            self.assertFalse(legacy.path().exists())
+            self.assertEqual(SecureStorage().base_dir, self.directory / "LibrusApp")
+
+            legacy.path().write_bytes(legacy_bytes)
+            current = FakePersistentStorage(self.directory / "LibrusApp")
+            current.save({"sample": "new-account"})
+            restored = SecureStorage()
+            restored._protector = FakeProtector()
+            self.assertEqual(restored.load(), {"sample": "new-account"})
+            restored.clear()
+            self.assertEqual(legacy.path().read_bytes(), legacy_bytes)
 
     def test_persistent_roundtrip_is_not_aliased_or_plaintext(self):
         storage = FakePersistentStorage(self.directory)
@@ -192,7 +220,7 @@ class NotificationTests(unittest.TestCase):
                 # Run the real program with a simulated notifier. Exit 7 is a
                 # sentinel proving Show was reached, without sending a toast.
                 script = _TOAST_SCRIPT.replace(
-                    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('SzkolnyPanel')",
+                    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('LibrusApp')",
                     "[pscustomobject]@{ Setting = " + setting + " }",
                 ).replace("$notifier.Show($toast)", "exit 7")
                 encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
@@ -237,7 +265,7 @@ class NotificationTests(unittest.TestCase):
         encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
         result = subprocess.run(
             [str(_powershell_path()), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-            input=_toast_payload("Szkolny Panel — przypomnienie", "Treść testowa"),
+            input=_toast_payload("LibrusApp — przypomnienie", "Treść testowa"),
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             shell=False, creationflags=0x08000000, timeout=15, check=False,
         )

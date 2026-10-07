@@ -4,9 +4,9 @@ from importlib import metadata
 import platform
 import sys
 
-from szkolny_panel import __version__
+from librus_app import __version__
 
-print(f"Szkolny Panel {__version__} - sprawdzenie srodowiska (bez logowania)")
+print(f"LibrusApp {__version__} - sprawdzenie srodowiska (bez logowania)")
 print("System:", platform.system(), platform.release())
 print("Python:", platform.python_version(), "architektura:", platform.machine())
 for name in ("librus-apix", "requests", "beautifulsoup4", "lxml", "aiohttp"):

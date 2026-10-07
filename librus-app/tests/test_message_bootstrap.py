@@ -5,7 +5,7 @@ import json
 import pytest
 import requests
 
-from szkolny_panel import connector as c
+from librus_app import connector as c
 from test_connector import message
 from test_login import Exchange, OAuthAdapter
 

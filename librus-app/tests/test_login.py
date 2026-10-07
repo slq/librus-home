@@ -15,7 +15,7 @@ import pytest
 import requests
 from requests.adapters import BaseAdapter
 
-from szkolny_panel import connector as c
+from librus_app import connector as c
 
 
 ENTRY = "https://synergia.librus.pl/loguj/portalRodzina"

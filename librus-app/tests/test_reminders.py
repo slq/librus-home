@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-from szkolny_panel.core import profile_id
-from szkolny_panel.platform_windows import SecureStorage, StorageError
-from szkolny_panel.reminders import due_datetime, restore_reminders
+from librus_app.core import profile_id
+from librus_app.platform_windows import SecureStorage, StorageError
+from librus_app.reminders import due_datetime, restore_reminders
 from test_core import connect, make_controller
 from test_calendar import schedule_app
 
@@ -47,7 +47,7 @@ def test_reminder_runs_once_at_due_time_even_offline_during_sync(kind):
         controller._check_reminders(due)
         controller._check_reminders(due + 60)
         assert len(notices) == 1
-        assert notices[0] == ("Szkolny Panel — przypomnienie", "Moja ważna sprawa")
+        assert notices[0] == ("LibrusApp — przypomnienie", "Moja ważna sprawa")
         assert client.calls == calls
         assert reminder["status"] == "fired"
         assert reminder["system_sent"]

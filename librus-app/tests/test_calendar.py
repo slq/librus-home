@@ -5,10 +5,10 @@ from datetime import date, datetime
 import pytest
 import tkinter as tk
 
-from szkolny_panel.calendar_view import item_day, shift_month
-from szkolny_panel.core import Controller
-from szkolny_panel.platform_windows import SecureStorage
-from szkolny_panel.ui import create_app
+from librus_app.calendar_view import item_day, shift_month
+from librus_app.core import Controller
+from librus_app.platform_windows import SecureStorage
+from librus_app.ui import create_app
 
 
 def event(ident, day, title="Sprawdzian", details="Przykładowa treść"):

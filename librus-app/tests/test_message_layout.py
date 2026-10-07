@@ -2,7 +2,7 @@
 
 import pytest
 
-from szkolny_panel.data import demo_sections
+from librus_app.data import demo_sections
 from test_calendar import schedule_app
 
 

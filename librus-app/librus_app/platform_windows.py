@@ -18,6 +18,7 @@ import threading
 from typing import Callable
 
 
+# Retain the storage header so existing encrypted accounts remain readable.
 _MAGIC = b"SZKOLNYPANEL-DPAPI-1\n"
 _MAX_JSON_BYTES = 32 * 1024 * 1024
 _MAX_FILE_BYTES = _MAX_JSON_BYTES + 1024 * 1024
@@ -86,7 +87,7 @@ class _DPAPI:
             else:
                 # Not setting CRYPTPROTECT_LOCAL_MACHINE binds this to CurrentUser.
                 ok = self._protect(
-                    ctypes.byref(incoming), "SzkolnyPanel", None, None, None,
+                    ctypes.byref(incoming), "LibrusApp", None, None, None,
                     _UI_FORBIDDEN, ctypes.byref(outgoing),
                 )
             if not ok or not outgoing.pbData or not 0 < outgoing.cbData <= _MAX_FILE_BYTES:
@@ -117,7 +118,12 @@ class SecureStorage:
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             if not local_app_data or not Path(local_app_data).is_absolute():
                 raise StorageError("Nie można ustalić lokalnego folderu danych Windows.")
-            self.base_dir = Path(local_app_data) / "SzkolnyPanel"
+            self.base_dir = Path(local_app_data) / "LibrusApp"
+            # Keep the previous state location when no LibrusApp state exists.
+            # Never merge accounts or move the user's encrypted data implicitly.
+            legacy_dir = Path(local_app_data) / "SzkolnyPanel"
+            if not (self.base_dir / "state.dpapi").exists() and (legacy_dir / "state.dpapi").exists():
+                self.base_dir = legacy_dir
         else:
             self.base_dir = None
         self._protector: _DPAPI | None = None
@@ -276,7 +282,7 @@ try {
     [void]$doc.GetElementsByTagName('text').Item(0).AppendChild($doc.CreateTextNode([string]$payload.title))
     [void]$doc.GetElementsByTagName('text').Item(1).AppendChild($doc.CreateTextNode([string]$payload.message))
     $toast = [Windows.UI.Notifications.ToastNotification]::new($doc)
-    if ([string]$payload.title -eq 'Szkolny Panel — przypomnienie') {
+    if ([string]$payload.title -eq 'LibrusApp — przypomnienie') {
         $toast.Tag = [Guid]::NewGuid().ToString('N').Substring(0, 16)
         $toast.Group = 'reminders'
     } else {
@@ -284,7 +290,7 @@ try {
         $toast.Group = 'school'
     }
     $toast.ExpirationTime = [DateTimeOffset]::Now.AddHours(8)
-    $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('SzkolnyPanel')
+    $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('LibrusApp')
     # A newly registered desktop identity may have no setting before its first
     # Show(). Only an explicit disabled status should stop that first submission.
     $setting = [string]$notifier.Setting
@@ -309,7 +315,7 @@ def _toast_payload(title: str, message: str) -> bytes:
 
     # ASCII JSON also avoids dependence on the PowerShell console's code page.
     return json.dumps({
-        "title": clean(title, 150) or "SzkolnyPanel",
+        "title": clean(title, 150) or "LibrusApp",
         "message": clean(message, 500),
     }, ensure_ascii=True).encode("ascii")
 
@@ -337,10 +343,10 @@ def _register_toast_application() -> None:
     # Register only this application's display identity in this user's registry.
     with winreg.CreateKeyEx(
         winreg.HKEY_CURRENT_USER,
-        r"Software\Classes\AppUserModelId\SzkolnyPanel",
+        r"Software\Classes\AppUserModelId\LibrusApp",
         0, winreg.KEY_SET_VALUE,
     ) as key:
-        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "SzkolnyPanel")
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "LibrusApp")
         winreg.SetValueEx(key, "ShowInSettings", 0, winreg.REG_DWORD, 1)
 
 

@@ -363,8 +363,8 @@ class Controller:
         if not self._notifications or self._stop_event.is_set() or not sum(changes.values()):
             return
         counts = ", ".join(f"{LABELS[k].lower()}: {v}" for k, v in changes.items() if v)
-        title = "Szkolny Panel — test" if demo else "Nowe informacje w dzienniku"
-        message = f"Zmiany — {counts}. Otwórz Szkolny Panel, aby zobaczyć szczegóły."
+        title = "LibrusApp — test" if demo else "Nowe informacje w dzienniku"
+        message = f"Zmiany — {counts}. Otwórz LibrusApp, aby zobaczyć szczegóły."
         # A school message or pupil's name never enters the OS notification text.
         shown = self._notifier(title, message)
         if not shown:
@@ -439,7 +439,7 @@ class Controller:
 
     def test_notification(self) -> None:
         def operation():
-            shown = self._notifier("Szkolny Panel — test", "Tak będą wyglądały powiadomienia o nowych informacjach w dzienniku.")
+            shown = self._notifier("LibrusApp — test", "Tak będą wyglądały powiadomienia o nowych informacjach w dzienniku.")
             self._notice("Wysłano test do Windows. Jeśli go nie widać, sprawdź tryb Nie przeszkadzać i ustawienia powiadomień."
                          if shown else "Nie udało się wysłać powiadomienia systemowego. Sprawdź ustawienia Windows.")
         self._launch(operation, "Sprawdzam powiadomienia…")
@@ -524,9 +524,9 @@ class Controller:
                 with self._lock:
                     if self._stop_event.is_set() or profile != (self._account, self._mode == "demo"):
                         continue
-                text = reminder["title"] if reminder["show_text"] else "Masz zaplanowane przypomnienie. Otwórz Szkolny Panel, aby zobaczyć szczegóły."
+                text = reminder["title"] if reminder["show_text"] else "Masz zaplanowane przypomnienie. Otwórz LibrusApp, aby zobaczyć szczegóły."
                 try:
-                    sent = bool(self._notifier("Szkolny Panel — przypomnienie", text))
+                    sent = bool(self._notifier("LibrusApp — przypomnienie", text))
                 except Exception:
                     sent = False
                 with self._lock:

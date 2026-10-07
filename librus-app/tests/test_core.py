@@ -7,10 +7,10 @@ from datetime import date
 
 import pytest
 
-from szkolny_panel.connector import ConnectorError
-from szkolny_panel.core import Controller
-from szkolny_panel.data import SnapshotTracker, demo_sections
-from szkolny_panel.platform_windows import SecureStorage
+from librus_app.connector import ConnectorError
+from librus_app.core import Controller
+from librus_app.data import SnapshotTracker, demo_sections
+from librus_app.platform_windows import SecureStorage
 
 
 class FakeConnector:
@@ -210,7 +210,7 @@ def test_forget_clears_only_local_state_and_stops_sync():
 
 
 def test_failed_disk_removal_still_clears_memory_credentials():
-    from szkolny_panel.platform_windows import StorageError
+    from librus_app.platform_windows import StorageError
 
     class LockedStorage(SecureStorage):
         def clear(self):

@@ -15,18 +15,18 @@ def _single_instance():
     kernel.CreateMutexW.restype = ctypes.c_void_p
     kernel.CloseHandle.argtypes = [ctypes.c_void_p]
     kernel.CloseHandle.restype = ctypes.c_int
-    handle = kernel.CreateMutexW(None, False, "Local\\SzkolnyPanel")
+    handle = kernel.CreateMutexW(None, False, "Local\\LibrusApp")
     if not handle:
         raise OSError("Cannot create instance mutex")
     if ctypes.get_last_error() == 183:
         kernel.CloseHandle(handle)
-        ctypes.windll.user32.MessageBoxW(None, "Szkolny Panel jest już uruchomiony. Sprawdź pasek zadań.", "Szkolny Panel", 0x40)
+        ctypes.windll.user32.MessageBoxW(None, "LibrusApp jest już uruchomiony. Sprawdź pasek zadań.", "LibrusApp", 0x40)
         return False, None
     return handle, kernel.CloseHandle
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Szkolny Panel — lokalny klient Synergii")
+    parser = argparse.ArgumentParser(description="LibrusApp — lokalny klient Synergii")
     parser.add_argument("--demo", action="store_true", help="tylko fikcyjne dane, bez logowania")
     args = parser.parse_args()
     # Keep LC_TIME at Python's default C locale: apix checks English 'Monday'.
@@ -37,7 +37,7 @@ def main() -> int:
         except (AttributeError, OSError):
             pass
         try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("SzkolnyPanel")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("LibrusApp")
         except (AttributeError, OSError):
             pass
     try:
@@ -57,11 +57,11 @@ def main() -> int:
                 release(handle)
     except Exception:
         # No credential-bearing traceback/log file is written by the launcher.
-        message = ("Nie udało się uruchomić Szkolnego Panelu. Uruchom ponownie Start.cmd. "
+        message = ("Nie udało się uruchomić LibrusApp. Uruchom ponownie Start.cmd. "
                    "Wymagany jest Python 3.11 lub nowszy z modułem tkinter.")
         if os.name == "nt":
             import ctypes
-            ctypes.windll.user32.MessageBoxW(None, message, "Szkolny Panel", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, message, "LibrusApp", 0x10)
         else:
             print(message, file=sys.stderr)
         return 1
