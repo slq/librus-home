@@ -4,7 +4,7 @@ Lokalny, nieoficjalny klient konta **LIBRUS Synergia** dla Windows. Wyświetla d
 
 **Wersja: 0.1.1. Status: prototyp rozwijany lokalnie.** Integracja korzysta z nieoficjalnych bibliotek i własnego adaptera logowania; zmiany po stronie Librusa lub konfiguracja szkoły mogą wymagać dostosowania kodu. Projekt nie jest powiązany z producentem dziennika.
 
-[Opis repozytorium](../README.md) · [Licencja](LICENSE) · [Źródła i zależności](THIRD_PARTY_NOTICES.md)
+[Opis repozytorium](../README.md) · [Historie użytkownika i kryteria akceptacji](USER_STORIES.md) · [Licencja](LICENSE) · [Źródła i zależności](THIRD_PARTY_NOTICES.md)
 
 ## Wymagania i uruchomienie
 

@@ -27,6 +27,8 @@ Przy pierwszym uruchomieniu skrypt tworzy `.venv` i instaluje zależności z PyP
 
 [README aplikacji](librus-app/README.md) zawiera instrukcję logowania, konfigurację przypomnień, informacje o danych lokalnych, ograniczenia integracji i rozwiązywanie problemów.
 
+[USER_STORIES.md](librus-app/USER_STORIES.md) zawiera historie użytkownika dla wszystkich paneli, kryteria akceptacji, scenariusze testowe oraz kwestie do rozstrzygnięcia przed stworzeniem wersji mobilnej.
+
 ## Struktura repozytorium
 
 ```text
@@ -35,6 +37,7 @@ librus-home/
 ├── .gitignore
 └── librus-app/
     ├── README.md
+    ├── USER_STORIES.md
     ├── Start.cmd
     ├── Demo.cmd
     ├── Sprawdz-srodowisko.cmd
