@@ -1,0 +1,31 @@
+# Local Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Account state, local secrets, and diagnostic captures
+*.dpapi
+state.dpapi.*
+.env
+.env.*
+credentials.json
+cookies.json
+cookies.txt
+*.log
+*.har
+
+# Local editor and Windows files
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini

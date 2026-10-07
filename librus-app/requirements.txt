@@ -1,0 +1,6 @@
+# Python 3.11+; tested with Python 3.12. These top-level versions were inspected.
+librus-apix==1.5.3
+requests==2.34.2
+beautifulsoup4==4.15.0
+lxml==6.1.3
+aiohttp==3.14.4
