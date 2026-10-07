@@ -17,11 +17,12 @@ class FakeConnector:
     fail_login = None
 
     def __init__(self, login, password):
-        self.rows = demo_sections()
+        self.rows = demo_sections(include_homework=True)
         self.errors = {}
         self.calls = []
         self.closed = False
         self.body_reads = 0
+        self.homework_reads = 0
         self.created.append(self)
 
     def connect(self):
@@ -43,6 +44,12 @@ class FakeConnector:
             raise self.errors["body"]
         return {"title": "Synthetic message", "text": "SYNTHETIC_FULL_BODY_NOT_FOR_DISK"}
 
+    def read_homework(self, item_id):
+        self.homework_reads += 1
+        if "homework_body" in self.errors:
+            raise self.errors["homework_body"]
+        return {"text": "SYNTHETIC_HOMEWORK_BODY_NOT_FOR_DISK"}
+
 
 class MobileTests(unittest.TestCase):
     def setUp(self):
@@ -61,7 +68,7 @@ class MobileTests(unittest.TestCase):
 
     def test_first_sync_is_quiet_and_password_is_opt_in(self):
         client = self.connect()
-        self.assertEqual(len(client.calls), 6)
+        self.assertEqual(len(client.calls), 7)
         self.assertEqual(sum(self.service.last_changes.values()), 0)
         exported = json.loads(self.service.export_json())
         self.assertIsNone(exported["credentials"])
@@ -124,7 +131,7 @@ class MobileTests(unittest.TestCase):
         client.calls.clear()
         self.service.refresh()
         self.assertNotIn("messages", client.calls)
-        self.assertEqual(len(client.calls), 5)
+        self.assertEqual(len(client.calls), 6)
         self.assertFalse(client.closed)
 
     def test_main_session_expiry_preserves_cache_and_requires_login(self):
@@ -193,6 +200,145 @@ class MobileTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.service.restore_json(invalid)
                 self.assertEqual(self.service.export_json(), before)
+
+    def test_change_counts_are_not_reused_after_rate_limit_or_reopening(self):
+        client = self.connect(remember=True)
+        client.rows["messages"][0]["title"] += " synthetic change"
+        self.service.refresh()
+        self.assertEqual(self.service.last_changes["messages"], 1)
+        self.service.retry_after = self.now + 3600
+        self.service.open()
+        self.assertEqual(self.service.last_changes, {})
+        self.service.retry_after = 0
+        self.service.open()
+        self.assertEqual(sum(self.service.last_changes.values()), 0)
+
+    def test_explicit_login_can_wait_without_fetching_data_during_cooldown(self):
+        self.service.connect("synthetic-parent", "test-only-password", True, False)
+        self.assertEqual(FakeConnector.created[-1].calls, [])
+        self.assertTrue(self.service.state()["connected"])
+        self.assertEqual(self.service.last_changes, {})
+        self.service.open()
+        self.assertEqual(len(FakeConnector.created[-1].calls), 7)
+        self.assertEqual(sum(self.service.last_changes.values()), 0)
+
+    def test_failed_automatic_login_is_not_repeated_by_focus_or_after_restart(self):
+        client = self.connect(remember=True)
+        client.close()
+        self.service.client = None
+        FakeConnector.fail_login = ConnectorError("Synthetic denial", requires_login=True)
+        self.service.open()
+        attempts = len(FakeConnector.created)
+        self.assertTrue(self.service.auto_login_blocked)
+        self.service.open()
+        self.assertEqual(len(FakeConnector.created), attempts)
+        restored = MobileService(factory=FakeConnector, clock=lambda: self.now)
+        restored.restore_json(self.service.export_json())
+        restored.open()
+        self.assertEqual(len(FakeConnector.created), attempts)
+        FakeConnector.fail_login = None
+        restored.connect("synthetic-parent", "test-only-password", True)
+        self.assertFalse(restored.auto_login_blocked)
+        self.assertTrue(restored.state()["connected"])
+
+    def test_homework_sync_is_quiet_then_detects_edit_and_keeps_previous_data_on_error(self):
+        client = self.connect()
+        self.assertIn("homework", client.calls)
+        self.assertEqual(client.homework_reads, 0)
+        self.assertEqual(self.service.last_changes["homework"], 0)
+        client.rows["homework"][0]["when"] = "2033-08-01T09:00:00"
+        client.rows["homework"][0]["title"] += " edited"
+        self.service.refresh()
+        self.assertEqual(self.service.last_changes["homework"], 1)
+        before = copy.deepcopy(self.service.tracker.sections["homework"])
+        timestamp = self.service.tracker.updated_at["homework"]
+        client.errors["homework"] = ConnectorError("Synthetic unavailable module")
+        self.service.refresh()
+        self.assertEqual(self.service.tracker.sections["homework"], before)
+        self.assertEqual(self.service.tracker.updated_at["homework"], timestamp)
+        self.assertIn("homework", self.service.errors)
+        self.assertTrue(self.service.state()["connected"])
+        self.assertIn("6/7", self.service.status)
+
+    def test_unavailable_homework_module_does_not_break_other_sections_or_repeat_access_attempt(self):
+        client = self.connect()
+        client.errors["homework"] = ConnectorError("Synthetic module denied", requires_login=True)
+        self.service.refresh()
+        self.assertFalse(client.closed)
+        self.assertIn("homework", self.service.blocked)
+        client.calls.clear()
+        self.service.refresh()
+        self.assertNotIn("homework", client.calls)
+        self.assertEqual(len(client.calls), 6)
+        self.assertIn("messages", client.calls)
+        self.service.connect("synthetic-parent", "test-only-password", False)
+        self.assertNotIn("homework", self.service.blocked)
+        self.assertIn("homework", FakeConnector.created[-1].calls)
+
+    def test_homework_body_is_explicit_and_not_persisted_or_a_change(self):
+        client = self.connect()
+        item = self.service.tracker.sections["homework"][0]
+        body = json.loads(self.service.read_homework(item["id"]))
+        self.assertEqual(body["id"], item["id"])
+        self.assertEqual(client.homework_reads, 1)
+        self.assertNotIn(body["text"], self.service.export_json())
+        self.service.refresh()
+        self.assertEqual(self.service.last_changes["homework"], 0)
+        self.assertIn("error", json.loads(self.service.read_homework("homework:unknown")))
+        self.assertEqual(client.homework_reads, 1)
+
+    def test_old_six_section_snapshot_restores_and_first_homework_fetch_is_quiet(self):
+        client = self.connect(remember=True)
+        saved = json.loads(self.service.export_json())
+        snapshot = saved["snapshot"]
+        for field in ("sections", "known", "updated_at", "coverage"):
+            snapshot[field].pop("homework", None)
+        snapshot["initialized"].remove("homework")
+        restored = MobileService(factory=FakeConnector, clock=lambda: self.now)
+        restored.restore_json(json.dumps(saved))
+        self.assertEqual(restored.tracker.sections["homework"], [])
+        self.assertEqual(restored.tracker.sections["grades"], self.service.tracker.sections["grades"])
+        restored.open()
+        self.assertTrue(restored.tracker.sections["homework"])
+        self.assertEqual(restored.last_changes["homework"], 0)
+        # Desktop keeps its six sections and does not silently start polling homework.
+        from librus_shared.data import KINDS, SnapshotTracker
+        self.assertEqual(len(KINDS), 6)
+        self.assertNotIn("homework", SnapshotTracker().sections)
+
+    def test_homework_detail_rate_limit_and_session_expiry_preserve_list(self):
+        client = self.connect(remember=True)
+        item_id = self.service.tracker.sections["homework"][0]["id"]
+        before = copy.deepcopy(self.service.tracker.sections["homework"])
+        client.errors["homework_body"] = ConnectorError("Synthetic rate limit", rate_limited=True)
+        self.assertIn("error", json.loads(self.service.read_homework(item_id)))
+        self.assertEqual(self.service.retry_after, self.now + 3600)
+        self.service.read_homework(item_id)
+        self.assertEqual(client.homework_reads, 1)
+        restored = MobileService(factory=FakeConnector, clock=lambda: self.now)
+        restored.restore_json(self.service.export_json())
+        self.assertEqual(restored.retry_after, self.now + 3600)
+        self.service.retry_after = 0
+        client.errors["homework_body"] = ConnectorError("Synthetic expired session", requires_login=True)
+        self.service.read_homework(item_id)
+        self.assertFalse(client.closed)
+        self.assertIn("homework", self.service.blocked)
+        self.assertEqual(self.service.mode, "live")
+        self.assertEqual(self.service.tracker.sections["homework"], before)
+
+    def test_homework_offline_details_and_demo_do_not_contact_school(self):
+        self.connect()
+        saved = self.service.export_json()
+        restored = MobileService(factory=FakeConnector)
+        restored.restore_json(saved)
+        item_id = restored.tracker.sections["homework"][0]["id"]
+        self.assertIn("error", json.loads(restored.read_homework(item_id)))
+        self.assertEqual(len(FakeConnector.created), 1)
+        restored.demo()
+        demo_id = restored.tracker.sections["homework"][0]["id"]
+        self.assertIn("Przykładowa treść zadania", json.loads(restored.read_homework(demo_id))["text"])
+        self.assertEqual(len(FakeConnector.created), 1)
+        self.assertEqual(restored.export_json(), "")
 
 
 if __name__ == "__main__":

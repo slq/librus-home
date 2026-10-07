@@ -9,14 +9,16 @@ import hashlib
 import json
 import time
 from librus_shared.connector import LibrusConnector, ConnectorError
-from librus_shared.data import KINDS, LABELS, SnapshotTracker, demo_sections
+from librus_shared.data import KINDS as DESKTOP_KINDS, LABELS, SnapshotTracker, demo_sections
+
+KINDS = (*DESKTOP_KINDS, "homework")
 
 
 class MobileService:
     def __init__(self, factory=LibrusConnector, clock=time.time):
         self.factory, self.clock = factory, clock
         self.client = None
-        self.tracker = SnapshotTracker()
+        self.tracker = SnapshotTracker(extra_kinds=("homework",))
         self.profile = ""
         self.credentials = None
         self.mode = "idle"
@@ -26,6 +28,7 @@ class MobileService:
         self.blocked = set()
         self.progress = None
         self.last_changes = {}
+        self.auto_login_blocked = False
         self.live_saved = None
 
     def state(self):
@@ -34,7 +37,7 @@ class MobileService:
                 "updated_at": dict(self.tracker.updated_at), "errors": dict(self.errors),
                 "connected": self.client is not None, "remembered": bool(self.credentials),
                 "needs_login": self.client is None and self.mode != "demo",
-                "retry_after": self.retry_after, "changes": dict(self.last_changes)}
+                "retry_after": self.retry_after, "changes": dict(self.last_changes), "profile": self.profile, "auto_login_blocked": self.auto_login_blocked}
 
     def state_json(self):
         return json.dumps(self.state(), ensure_ascii=False)
@@ -51,13 +54,13 @@ class MobileService:
             return ""
         return json.dumps({"version": 1, "profile": self.profile,
                            "credentials": self.credentials, "snapshot": self.tracker.export(),
-                           "retry_after": self.retry_after}, ensure_ascii=False)
+                           "retry_after": self.retry_after, "auto_login_blocked": self.auto_login_blocked}, ensure_ascii=False)
 
     def restore_json(self, raw):
         value = json.loads(raw) if raw else {}
         if not isinstance(value, dict) or (value and value.get("version") != 1):
             raise ValueError("Invalid saved state")
-        tracker = SnapshotTracker(value.get("snapshot"))
+        tracker = SnapshotTracker(value.get("snapshot"), extra_kinds=("homework",))
         profile = value.get("profile", "")
         credentials = value.get("credentials")
         if not isinstance(profile, str):
@@ -67,10 +70,14 @@ class MobileService:
                 or not all(isinstance(credentials.get(k), str) and credentials[k] for k in ("login", "password"))
                 or self.profile_id(credentials["login"]) != profile):
                 raise ValueError("Invalid credentials")
+        blocked = value.get("auto_login_blocked", False)
+        if not isinstance(blocked, bool):
+            raise ValueError("Invalid automatic login state")
         retry = value.get("retry_after", 0)
         if not isinstance(retry, (int, float)) or not 0 <= retry < float("inf"):
             raise ValueError("Invalid retry date")
         self.tracker, self.profile, self.credentials = tracker, profile, credentials
+        self.auto_login_blocked = blocked
         self.retry_after = max(self.retry_after, retry)
         self.mode = "offline" if tracker.initialized else "idle"
         self.status = "Zapisana kopia. Połącz konto, aby pobrać aktualne dane." if tracker.initialized else "Połącz konto Synergia lub obejrzyj demo."
@@ -99,7 +106,9 @@ class MobileService:
             return False
         return True
 
-    def connect(self, login, password, remember=False):
+    def connect(self, login, password, remember=False, fetch=True):
+        self.last_changes = {}
+        self.auto_login_blocked = False
         login = login.strip()
         if not login or not password:
             self.errors["connection"] = "Wpisz login Synergia i hasło."
@@ -135,25 +144,38 @@ class MobileService:
                 self.status = "Nie udało się połączyć konta."
             return self.state_json()
         target_profile = self.profile_id(login)
-        self.tracker = SnapshotTracker(previous.get("snapshot")) if previous and previous.get("profile") == target_profile else SnapshotTracker()
+        self.tracker = SnapshotTracker(previous.get("snapshot"), extra_kinds=("homework",)) if previous and previous.get("profile") == target_profile else SnapshotTracker(extra_kinds=("homework",))
         self.profile = target_profile
         self.credentials = {"login": login, "password": password} if remember else None
         self.client, self.mode = candidate, "live"
         self.blocked.clear()
         self.live_saved = None
+        if not fetch:
+            self.status = "Konto połączone. Kolejny odczyt danych po zakończeniu przerwy 5 minut."
+            return self.state_json()
         return self.refresh()
 
     def open(self):
+        self.last_changes = {}
         if self.mode == "demo":
             return self.state_json()
         if self.client:
             return self.refresh()
+        if self.auto_login_blocked:
+            self.status = "Automatyczne logowanie wstrzymane. Połącz konto ponownie przyciskiem Konto."
+            return self.state_json()
         if self.credentials:
             credentials = dict(self.credentials)
-            return self.connect(credentials["login"], credentials["password"], True)
+            result = self.connect(credentials["login"], credentials["password"], True)
+            if self.client is None and self.clock() >= self.retry_after:
+                self.auto_login_blocked = True
+                self.status = "Automatyczne logowanie wstrzymane. Połącz konto ponownie przyciskiem Konto."
+                return self.state_json()
+            return result
         return self.state_json()
 
     def refresh(self):
+        self.last_changes = {}
         if self.mode == "demo":
             return self.state_json()
         if not self._allowed():
@@ -162,7 +184,7 @@ class MobileService:
             self.status = "Połącz konto, aby odświeżyć dane."
             return self.state_json()
         successes, changes = 0, {}
-        for kind in ("grades", "schedule", "attendance", "timetable", "announcements", "messages"):
+        for kind in ("grades", "schedule", "attendance", "timetable", "announcements", "homework", "messages"):
             if kind in self.blocked:
                 continue
             self.status = "Pobieram: " + LABELS[kind].lower() + "…"
@@ -178,10 +200,13 @@ class MobileService:
                     self.retry_after = self.clock() + 3600
                     break
                 if exc.requires_login:
-                    if kind == "messages":
+                    if kind in {"messages", "homework"}:
+                        # A module may be unavailable for this account while the
+                        # core school session and other sections still work.
                         self.blocked.add(kind)
                     else:
                         self.close_client()
+                        self.auto_login_blocked = True
                         break
             except Exception:
                 self.errors[kind] = "Nie rozpoznano danych sekcji. Zachowano poprzedni odczyt."
@@ -195,7 +220,7 @@ class MobileService:
         elif successes == len(KINDS):
             self.status = "Dane aktualne. " + (f"Zmiany: {sum(changes.values())}." if sum(changes.values()) else "Brak nowych zmian.")
         elif successes:
-            self.status = f"Odświeżono {successes}/6 sekcji. Sprawdź komunikaty pozostałych."
+            self.status = f"Odświeżono {successes}/{len(KINDS)} sekcji. Sprawdź komunikaty pozostałych."
         else:
             self.status = "Nie pobrano nowych danych. " + ("Pokazuję ostatnią kopię." if self.tracker.initialized else "Sprawdź błędy sekcji.")
         return self.state_json()
@@ -223,13 +248,37 @@ class MobileService:
         except Exception:
             return json.dumps({"error": "Nie udało się pobrać treści wiadomości."})
 
+    def read_homework(self, item_id):
+        item = next((row for row in self.tracker.sections["homework"] if row["id"] == item_id), None)
+        if item is None:
+            return json.dumps({"error": "Zadanie nie znajduje się w pobranej liście."})
+        if self.mode == "demo":
+            return json.dumps({"id": item_id, "text": "Przykładowa treść zadania: rozwiąż ćwiczenia i przygotuj odpowiedź na kolejną lekcję. Demo nie łączy się z Librusem."}, ensure_ascii=False)
+        if not self._allowed():
+            return json.dumps({"error": self.status})
+        if not self.client:
+            return json.dumps({"error": "Połącz konto, aby pobrać treść zadania."})
+        try:
+            body = self.client.read_homework(item_id)
+            self.errors.pop("homework", None)
+            return json.dumps({"id": item_id, "text": body["text"]}, ensure_ascii=False)
+        except ConnectorError as exc:
+            self.errors["homework"] = str(exc)
+            if exc.rate_limited:
+                self.retry_after = self.clock() + 3600
+            if exc.requires_login:
+                self.blocked.add("homework")
+            return json.dumps({"error": str(exc)})
+        except Exception:
+            return json.dumps({"error": "Nie udało się pobrać treści zadania."})
+
     def demo(self):
         if self.mode != "demo":
             self.live_saved = json.loads(self.export_json())
         self.close_client()
         self.credentials = None
-        self.tracker = SnapshotTracker()
-        for kind, rows in demo_sections().items():
+        self.tracker = SnapshotTracker(extra_kinds=("homework",))
+        for kind, rows in demo_sections(include_homework=True).items():
             self.tracker.apply(kind, rows)
         self.mode, self.errors = "demo", {}
         self.status = "Dane demonstracyjne — bez połączenia z Librusem."
@@ -237,8 +286,9 @@ class MobileService:
 
     def forget(self):
         self.close_client()
-        self.tracker = SnapshotTracker()
+        self.tracker = SnapshotTracker(extra_kinds=("homework",))
         self.profile, self.credentials, self.live_saved = "", None, None
+        self.auto_login_blocked = False
         self.mode, self.errors, self.blocked = "idle", {}, set()
         self.status = "Usunięto lokalne dane i konto."
         return self.state_json()

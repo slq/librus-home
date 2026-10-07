@@ -253,3 +253,94 @@ def test_message_bootstrap_reuses_existing_oauth_without_login(monkeypatch):
     obj._bootstrap_messages()
     obj._bootstrap_messages()
     assert calls == [c.SECTION_URLS["messages"]]
+
+
+def homework_connector(responses):
+    obj = c.LibrusConnector("synthetic-homework", "test-only-password")
+    client = c.Client(token=c.Token(dzienniks="synthetic-sid", sdzienniks="synthetic-ssid"))
+    client._session.close()
+    session = c.GuardedSession()
+    adapter = FixtureAdapter(responses)
+    session.mount("https://", adapter)
+    client._session = session
+    obj._client, obj._session = client, session
+    return obj, adapter
+
+
+def homework_html(topic="Ćwiczenia z ułamków", due="2026-10-09", ident="123"):
+    return f"""<table class="decorated myHomeworkTable"><tr class="line0">
+    <td>Matematyka</td><td>Nauczyciel — przykład</td><td>{topic}</td><td>Ćwiczenia</td>
+    <td>2026-10-07</td><td>12:30</td><td>{due}</td><td>08:00</td>
+    <td><input onclick="podglad('/moje_zadania/podglad/{ident}/');"></td>
+    </tr></table>"""
+
+
+def test_homework_uses_actual_parser_stable_server_id_and_no_detail_requests(monkeypatch):
+    class October(date):
+        @classmethod
+        def today(cls): return cls(2026, 10, 7)
+    monkeypatch.setattr(c, "date", October)
+    obj, adapter = homework_connector([(200, homework_html(), {"Content-Type": "text/html"}),
+                                       (200, homework_html("Zmieniony temat", "2026-10-12"), {"Content-Type": "text/html"})])
+    first, edited = obj.fetch("homework")[0], obj.fetch("homework")[0]
+    assert first["id"] == edited["id"] == "homework:123"
+    assert first["title"] == "Ćwiczenia z ułamków"
+    assert first["subtitle"] == "Matematyka · Nauczyciel — przykład"
+    assert first["when"] == "2026-10-09T08:00:00"
+    assert "Kategoria: Ćwiczenia" in first["details"]
+    assert "Dodano: 2026-10-07T12:30:00" in first["details"]
+    assert edited["when"] == "2026-10-12T08:00:00"
+    assert first["url"] == "https://synergia.librus.pl/moje_zadania/podglad/123"
+    assert len(adapter.calls) == 2
+    for request, options in adapter.calls:
+        assert request.url == "https://synergia.librus.pl/moje_zadania"
+        assert request.method == "POST"
+        assert parse_qs(request.body) == {"dataOd": ["2026-09-01"], "dataDo": ["2027-08-31"], "przedmiot": ["-1"], "status": ["-1"]}
+        assert options["verify"] is True
+
+
+def test_homework_details_are_explicit_inert_and_confined_to_numeric_id():
+    html = '<div class="container-background"><table><tr class="line0"><td>Treść</td><td><p>Oblicz 1/2 + 1/4.</p><script>PRIVATE_SCRIPT</script><img src="https://external.invalid/image"></td></tr></table></div>'
+    obj, adapter = homework_connector([(200, html, {"Content-Type": "text/html"})])
+    for invalid in ("homework:../../outside", "homework:https://external.invalid", "messages:123", "homework:12?token=secret"):
+        with pytest.raises(c.ConnectorError): obj.read_homework(invalid)
+    assert adapter.calls == []
+    body = obj.read_homework("homework:123")
+    assert "Oblicz 1/2 + 1/4." in body["text"]
+    assert "PRIVATE_SCRIPT" not in body["text"]
+    assert "external.invalid" not in body["text"]
+    assert adapter.calls[0][0].url == "https://synergia.librus.pl/moje_zadania/podglad/123"
+    assert adapter.calls[0][0].method == "GET"
+
+
+@pytest.mark.parametrize("html,empty", [('<p class="msgEmptyTable">Brak zadań</p>', True), ('<p>Unexpected layout</p>', False), (homework_html(ident="../../outside"), False)])
+def test_homework_distinguishes_empty_from_malformed_or_unsafe_list(html, empty):
+    obj, _ = homework_connector([(200, html, {"Content-Type": "text/html"})])
+    if empty: assert obj.fetch("homework") == []
+    else:
+        with pytest.raises(c.ConnectorError): obj.fetch("homework")
+
+
+@pytest.mark.parametrize("assigned_day,due_day", [("środa", "piątek"), ("ŚR.", "PT."), ("(środa)", "(piątek)")])
+def test_homework_dates_with_weekday_columns_keep_date_only(assigned_day, due_day):
+    # The observed table has ten cells: dates followed by weekday descriptions,
+    # an additional status cell, and the details button. apix concatenates each
+    # date with its neighbouring description before returning the DTO.
+    html = homework_html().replace('<td>12:30</td>', '<td>'+assigned_day+'</td>').replace('<td>08:00</td>', '<td>'+due_day+'</td>')
+    html = html.replace('<td><input onclick=', '<td>-</td><td><input onclick=')
+    obj, adapter = homework_connector([(200, html, {"Content-Type": "text/html"})])
+    rows = obj.fetch("homework")
+    assert len(rows) == 1
+    assert rows[0]["id"] == "homework:123"
+    assert rows[0]["title"] == "Ćwiczenia z ułamków"
+    assert rows[0]["when"] == "2026-10-09"
+    assert "Dodano: 2026-10-07" in rows[0]["details"]
+    assert "T00:00" not in rows[0]["details"]
+    assert len(adapter.calls) == 1
+
+
+@pytest.mark.parametrize("suffix", ["unknown-description", "25:77", "piątek-secret"])
+def test_homework_unknown_date_suffix_is_not_silently_discarded(suffix):
+    html = homework_html().replace('<td>08:00</td>', '<td>'+suffix+'</td>')
+    obj, _ = homework_connector([(200, html, {"Content-Type": "text/html"})])
+    with pytest.raises(c.ConnectorError): obj.fetch("homework")

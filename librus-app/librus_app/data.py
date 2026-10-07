@@ -12,7 +12,7 @@ from typing import Any
 KINDS = ("grades", "messages", "announcements", "schedule", "attendance", "timetable")
 LABELS = {
     "grades": "Oceny", "messages": "Wiadomości", "announcements": "Ogłoszenia", "schedule": "Terminarz",
-    "attendance": "Frekwencja", "timetable": "Plan lekcji",
+    "attendance": "Frekwencja", "timetable": "Plan lekcji", "homework": "Zadania domowe",
 }
 SCOPE_HINTS = {
     "grades": "Oceny udostępnione przez szkołę w bieżącym roku szkolnym.",
@@ -21,6 +21,7 @@ SCOPE_HINTS = {
     "schedule": "Bieżący i następny miesiąc.",
     "attendance": "Wpisy frekwencji udostępnione przez szkołę; to nie procent obecności.",
     "timetable": "Bieżący i następny tydzień.",
+    "homework": "Zadania udostępnione przez Librusa dla bieżącego roku szkolnego.",
 }
 
 
@@ -56,7 +57,7 @@ def fingerprint(item: dict[str, Any]) -> str:
 
 
 def normalize_items(kind: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if kind not in KINDS or not isinstance(items, list):
+    if kind not in (*KINDS, "homework") or not isinstance(items, list):
         raise ValueError("Nieprawidłowy format listy danych.")
     result: dict[str, dict[str, Any]] = {}
     for original in items:
@@ -69,7 +70,7 @@ def normalize_items(kind: str, items: list[dict[str, Any]]) -> list[dict[str, An
             raise ValueError("Odczyt zawiera sprzeczne wpisy o tym samym identyfikatorze.")
         result[item["id"]] = item
     return sorted(result.values(), key=lambda x: (x["when"], x["title"], x["id"]),
-                  reverse=kind not in {"schedule", "timetable"})
+                  reverse=kind not in {"schedule", "timetable", "homework"})
 
 
 class SnapshotTracker:
@@ -81,10 +82,13 @@ class SnapshotTracker:
     are also detected. Absence from a paginated mailbox is not a deletion.
     """
 
-    def __init__(self, saved: dict[str, Any] | None = None):
-        self.sections: dict[str, list[dict[str, Any]]] = {k: [] for k in KINDS}
+    def __init__(self, saved: dict[str, Any] | None = None, *, extra_kinds: tuple[str, ...] = ()):
+        if any(k != "homework" for k in extra_kinds):
+            raise ValueError("Nieobsługiwana dodatkowa sekcja.")
+        self.kinds = tuple(dict.fromkeys((*KINDS, *extra_kinds)))
+        self.sections: dict[str, list[dict[str, Any]]] = {k: [] for k in self.kinds}
         self.updated_at: dict[str, str] = {}
-        self.known: dict[str, dict[str, str]] = {k: {} for k in KINDS}
+        self.known: dict[str, dict[str, str]] = {k: {} for k in self.kinds}
         self.coverage: dict[str, set[str]] = {}
         self.initialized: set[str] = set()
         self.year = school_year()
@@ -101,7 +105,7 @@ class SnapshotTracker:
         known = saved.get("known", {})
         if not all(isinstance(v, dict) for v in (sections, updated, known)):
             raise ValueError("Nieprawidłowy format zapisanej kopii.")
-        for kind in KINDS:
+        for kind in self.kinds:
             if kind in sections:
                 self.sections[kind] = normalize_items(kind, sections[kind])
             if kind in updated:
@@ -110,9 +114,9 @@ class SnapshotTracker:
                 if not isinstance(known[kind], dict):
                     raise ValueError("Nieprawidłowy format historii zmian.")
                 self.known[kind] = {str(k): str(v) for k, v in known[kind].items()}
-        self.initialized = set(saved.get("initialized", [])).intersection(KINDS)
+        self.initialized = set(saved.get("initialized", [])).intersection(self.kinds)
         self.coverage = {k: set(v) for k, v in saved.get("coverage", {}).items()
-                         if k in KINDS and isinstance(v, list)}
+                         if k in self.kinds and isinstance(v, list)}
 
     def apply(self, kind: str, items: list[dict[str, Any]], fetched_at: str | None = None,
               today: date | None = None) -> int:
@@ -163,7 +167,7 @@ class SnapshotTracker:
         })
 
 
-def demo_sections(today: date | None = None) -> dict[str, list[dict[str, Any]]]:
+def demo_sections(today: date | None = None, *, include_homework: bool = False) -> dict[str, list[dict[str, Any]]]:
     """Invented examples only. No child name, school, or real account."""
     today = today or date.today()
     d = lambda offset: (today + timedelta(days=offset)).isoformat()
@@ -173,7 +177,7 @@ def demo_sections(today: date | None = None) -> dict[str, list[dict[str, Any]]]:
                 "subtitle": subtitle, "when": when, "details": details,
                 "unread": unread, "url": ""}
 
-    return {
+    sections = {
         "grades": [
             item("grades", "g1", "Matematyka · 5", "Sprawdzian: ułamki", d(0),
                  "Ocena: 5\nPrzedmiot: matematyka\nKategoria: sprawdzian\nWaga: 2\n\nDane demonstracyjne."),
@@ -212,3 +216,13 @@ def demo_sections(today: date | None = None) -> dict[str, list[dict[str, Any]]]:
             item("timetable", "t5", "Historia", "08:00–08:45 · sala 7", d(1) + " 08:00"),
         ],
     }
+    if include_homework:
+        sections["homework"] = [
+            item("homework", "h1", "Ćwiczenia z ułamków", "Matematyka · Nauczyciel — przykład", d(1) + "T08:00:00",
+                 "Przedmiot: Matematyka\nKategoria: ćwiczenia\nDodano: " + d(-1) + "\nTermin wykonania: " + d(1) + " 08:00\nPełną treść pobierzesz osobnym przyciskiem.\nDane demonstracyjne."),
+            item("homework", "h2", "Opis ulubionej książki", "Język polski · Nauczyciel — przykład", d(3),
+                 "Kategoria: wypracowanie\nTermin wykonania: " + d(3) + "\nDane demonstracyjne."),
+            item("homework", "h3", "Powtórka słownictwa", "Język angielski · Nauczyciel — przykład", d(-1),
+                 "Termin wykonania: " + d(-1) + "\nDane demonstracyjne."),
+        ]
+    return sections

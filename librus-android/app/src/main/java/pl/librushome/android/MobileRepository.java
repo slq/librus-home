@@ -3,7 +3,6 @@ package pl.librushome.android;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
@@ -16,6 +15,7 @@ public final class MobileRepository {
     public interface Listener {
         void onState(JSONObject state);
         void onMessage(JSONObject content);
+        void onHomework(JSONObject content);
     }
     private interface Operation { void run() throws Exception; }
     @android.annotation.SuppressLint("StaticFieldLeak") // Only an application context; never an Activity.
@@ -36,7 +36,6 @@ public final class MobileRepository {
     private volatile String storageError = "";
     private volatile String operationError = "";
     private boolean writeEnabled = true;
-    private volatile long lastOpen = -60000;
 
     private MobileRepository(Context context) {
         this.context = context;
@@ -58,11 +57,19 @@ public final class MobileRepository {
             storageError = "Nie można odczytać lokalnego zapisu. Zachowano plik. Usuń lokalne dane lub połącz konto ponownie.";
             writeEnabled = false;
         }
+        JSONObject recovered;
+        try { recovered = new JSONObject(service.callAttr("state_json").toString()); }
+        catch (Exception ignored) { recovered = new JSONObject(); }
+        if (BackgroundSync.enabled(context)) {
+            if (recovered.optBoolean("remembered") && !recovered.optBoolean("auto_login_blocked")) BackgroundSync.configure(context, true);
+            else BackgroundSync.enabled(context, false);
+        }
         initialized = true;
     }
 
-    private synchronized void submit(Operation operation) {
-        if (busy) return;
+    private void submit(Operation operation) { submit(operation, null); }
+    private synchronized void submit(Operation operation, Runnable completion) {
+        if (busy) { if (completion != null) main.post(completion); return; }
         busy = true;
         operationError = "";
         dispatch();
@@ -74,39 +81,42 @@ public final class MobileRepository {
             } finally {
                 try { if (service != null) update(service.callAttr("state_json").toString()); }
                 catch (Exception ignored) { }
-                main.post(() -> { busy = false; dispatch(); });
+                main.post(() -> { busy = false; dispatch(); if (completion != null) completion.run(); });
             }
         });
     }
 
-    private void persist() {
-        if (!writeEnabled) return;
+    private boolean persist() {
+        if (!writeEnabled) return false;
         String json = service.callAttr("export_json").toString();
-        if (json.isEmpty()) return; // Demo must never replace a real account.
-        try { store.write(json); storageError = ""; }
-        catch (Exception error) { storageError = "Nie zapisano danych. Bieżący widok pozostaje dostępny; po zamknięciu zmiany mogą zniknąć."; }
+        if (json.isEmpty()) return false; // Demo must never replace a real account.
+        try { store.write(json); storageError = ""; return true; }
+        catch (Exception error) { storageError = "Nie zapisano danych. Bieżący widok pozostaje dostępny; po zamknięciu zmiany mogą zniknąć."; return false; }
     }
 
     public void open() {
-        if (busy || (initialized && SystemClock.elapsedRealtime() - lastOpen < 60000)) return;
-        lastOpen = SystemClock.elapsedRealtime();
-        submit(() -> { service.callAttr("open"); persist(); });
+        if (busy || (initialized && SyncPolicy.remaining(context) > 0)) return;
+        submit(() -> {
+            JSONObject before = new JSONObject(service.callAttr("state_json").toString());
+            if (before.optString("mode").equals("demo") || (!before.optBoolean("connected") && !before.optBoolean("remembered"))) return;
+            if (!SyncPolicy.begin(context)) return;
+            service.callAttr("open"); finishSync();
+        });
     }
 
     public void refresh() {
         if (busy) return;
-        if (SystemClock.elapsedRealtime() - lastOpen < 60000) {
-            operationError = "Poczekaj minutę od ostatniego odczytu, aby ograniczyć liczbę zapytań.";
-            dispatch();
-            return;
+        if (SyncPolicy.remaining(context) > 0) {
+            operationError = "Dane pobierane są nie częściej niż co 5 minut. Poczekaj do końca przerwy.";
+            dispatch(); return;
         }
-        lastOpen = SystemClock.elapsedRealtime();
-        submit(() -> { service.callAttr("refresh"); persist(); });
+        open();
     }
 
     public void connect(String login, String password, boolean remember) {
         submit(() -> {
             if (!remember) {
+                BackgroundSync.enabled(context, false);
                 // Revoke the persisted password before trying any new credentials.
                 service.callAttr("revoke_remembered");
                 try {
@@ -121,15 +131,48 @@ public final class MobileRepository {
                     return;
                 }
             }
-            service.callAttr("connect", login, password, remember);
-            lastOpen = SystemClock.elapsedRealtime();
+            boolean mayFetch = SyncPolicy.begin(context);
+            service.callAttr("connect", login, password, remember, mayFetch);
             // An explicit successful login permits replacing an unreadable old state.
             if (service.callAttr("state").get("connected").toBoolean()) writeEnabled = true;
-            persist();
+            finishSync();
         });
     }
 
-    public void demo() { submit(() -> service.callAttr("demo")); }
+    private void finishSync() throws Exception {
+        JSONObject current = new JSONObject(service.callAttr("state_json").toString());
+        boolean saved = persist();
+        if (saved && !current.optString("mode").equals("demo") && NotificationHub.dataEnabled(context)) {
+            String outcome = NotificationHub.changes(context, current.optJSONObject("changes") == null ? new JSONObject() : current.getJSONObject("changes"));
+            if (outcome.equals("blocked")) operationError = "Nowe dane zapisano, ale Android blokuje powiadomienia. Sprawdź ustawienia powiadomień.";
+        }
+        if (BackgroundSync.enabled(context)) {
+            if (!current.optBoolean("remembered") || current.optString("mode").equals("demo")) BackgroundSync.enabled(context, false);
+            else BackgroundSync.configure(context, true);
+        }
+    }
+
+    public void backgroundRefresh(Runnable completion) {
+        if (!BackgroundSync.enabled(context)) {
+            BackgroundSync.configure(context, false); main.post(completion); return;
+        }
+        if (busy) { main.post(completion); return; }
+        submit(() -> {
+            JSONObject before = new JSONObject(service.callAttr("state_json").toString());
+            if (!before.optBoolean("remembered") || before.optString("mode").equals("demo")) {
+                BackgroundSync.enabled(context, false); return;
+            }
+            if (!SyncPolicy.begin(context)) return;
+            service.callAttr("open"); finishSync();
+            JSONObject after = new JSONObject(service.callAttr("state_json").toString());
+            if (after.optBoolean("needs_login") && after.optDouble("retry_after") * 1000 <= System.currentTimeMillis()) {
+                BackgroundSync.enabled(context, false);
+                operationError = "Odczyt w tle zatrzymany: zaloguj się ponownie i włącz odświeżanie w Ustawieniach.";
+            }
+        }, completion);
+    }
+
+    public void demo() { submit(() -> { BackgroundSync.enabled(context, false); service.callAttr("demo"); }); }
 
     public void readMessage(String itemId) {
         submit(() -> {
@@ -139,10 +182,19 @@ public final class MobileRepository {
         });
     }
 
+    public void readHomework(String itemId) {
+        submit(() -> {
+            JSONObject content = new JSONObject(service.callAttr("read_homework", itemId).toString());
+            persist(); // Preserve a possible HTTP 429 cooldown or expired-session flag.
+            main.post(() -> { if (listener != null) listener.onHomework(content); });
+        });
+    }
+
     public void forget() {
         submit(() -> {
+            BackgroundSync.enabled(context, false);
             service.callAttr("forget");
-            try { store.clear(); storageError = ""; writeEnabled = true; }
+            try { ReminderAlarms.clear(context); store.clear(); storageError = ""; writeEnabled = true; }
             catch (Exception error) { storageError = "Wyczyszczono pamięć, ale nie usunięto pliku danych. Spróbuj ponownie przed zamknięciem aplikacji."; writeEnabled = false; }
         });
     }

@@ -27,8 +27,8 @@ import java.util.*;
 public final class MainActivity extends Activity implements MobileRepository.Listener {
     private static final int BG = 0xfff4f6fa, INK = 0xff183047, MUTED = 0xff64748b;
     private static final int TEAL = 0xff087e8b, WHITE = Color.WHITE, DARK = 0xff172d40;
-    private static final String[] KEYS = {"overview", "grades", "messages", "announcements", "schedule", "attendance", "timetable", "settings"};
-    private static final String[] TITLES = {"Przegląd", "Oceny", "Wiadomości", "Ogłoszenia", "Terminarz", "Frekwencja", "Plan lekcji", "Ustawienia"};
+    private static final String[] KEYS = {"overview", "grades", "messages", "announcements", "schedule", "homework", "attendance", "timetable", "reminders", "settings"};
+    private static final String[] TITLES = {"Przegląd", "Oceny", "Wiadomości", "Ogłoszenia", "Terminarz", "Zadania domowe", "Frekwencja", "Plan lekcji", "Przypomnienia", "Ustawienia"};
     private MobileRepository repository;
     private JSONObject state = new JSONObject();
     private LinearLayout shell, list, filters;
@@ -41,10 +41,20 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
     private final Map<String, String> queries = new HashMap<>();
     private String page = "overview";
     private int sort = 0;
-    private boolean calendar = true, loginPrompted, updatingSearch;
+    private boolean calendar = true, homeworkUpcoming = true, loginPrompted, updatingSearch;
     private YearMonth month = YearMonth.now();
     private LocalDate selectedDay;
     private Dialog loginDialog;
+    private ReminderUi reminderUi;
+    private String pendingReminder;
+    private boolean remindersReady, receiverRegistered;
+    private final android.os.Handler foreground = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable refreshTick = new Runnable() {
+        public void run() { repository.open(); foreground.postDelayed(this, 30000); }
+    };
+    private final android.content.BroadcastReceiver reminderUpdates = new android.content.BroadcastReceiver() {
+        public void onReceive(android.content.Context c, Intent intent) { reloadReminders(); }
+    };
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -52,6 +62,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         if (saved != null) {
             page = saved.getString("page", "overview");
             calendar = saved.getBoolean("calendar", true);
+            homeworkUpcoming = saved.getBoolean("homeworkUpcoming", true);
             loginPrompted = saved.getBoolean("loginPrompted", false);
             try { month = YearMonth.parse(saved.getString("month", month.toString())); }
             catch (Exception ignored) { }
@@ -61,6 +72,16 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
             if (savedQueries != null) for (String key : savedQueries.keySet()) queries.put(key, savedQueries.getString(key, ""));
         }
         repository = MobileRepository.get(this);
+        NotificationHub.channels(this);
+        reminderUi = new ReminderUi(this, () -> state, () -> {
+            updateReminderBadge();
+            if (page.equals("reminders")) renderList();
+        }, this::showReminderSource);
+        pendingReminder = getIntent().getStringExtra("reminder_id");
+        if (pendingReminder != null) { page = "reminders"; loginPrompted = true; }
+        else if (getIntent().getData() != null && "changes".equals(getIntent().getData().getHost())) {
+            page = "overview"; loginPrompted = true;
+        }
         buildShell();
         select(page);
         // Synthetic startup mode is useful for repeatable device smoke tests.
@@ -74,8 +95,52 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         super.onStart();
         repository.observe(this);
         repository.open();
+        foreground.removeCallbacks(refreshTick); foreground.postDelayed(refreshTick, 30000);
+        android.content.IntentFilter events = new android.content.IntentFilter("pl.librushome.android.REMINDERS_CHANGED");
+        if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(reminderUpdates, events, getPackageName() + ".INTERNAL", null, android.content.Context.RECEIVER_NOT_EXPORTED);
+        else registerLegacyReminderUpdates(events);
+        receiverRegistered = true; reloadReminders();
     }
-    @Override protected void onStop() { repository.observe(null); super.onStop(); }
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag") // Only API 26–32, protected by our signature permission.
+    private void registerLegacyReminderUpdates(android.content.IntentFilter events) {
+        registerReceiver(reminderUpdates, events, getPackageName() + ".INTERNAL", null);
+    }
+    @Override protected void onResume() { super.onResume(); if (reminderUi != null) reloadReminders(); }
+    @Override public void onWindowFocusChanged(boolean hasFocus) { super.onWindowFocusChanged(hasFocus); if (hasFocus && repository != null) repository.open(); }
+    @Override protected void onStop() {
+        foreground.removeCallbacks(refreshTick);
+        if (receiverRegistered) { unregisterReceiver(reminderUpdates); receiverRegistered = false; }
+        repository.observe(null); super.onStop();
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent); setIntent(intent); pendingReminder = intent.getStringExtra("reminder_id");
+        if (pendingReminder != null) {
+            loginPrompted = true;
+            remindersReady = false; // The receiver may have updated the stored status while this Activity was stopped.
+            select("reminders"); reloadReminders();
+        } else if (intent.getData() != null && "changes".equals(intent.getData().getHost())) select("overview");
+    }
+    private void updateReminderBadge() {
+        Button tab = tabs.get("reminders");
+        if (tab != null && reminderUi != null) {
+            int count = reminderUi.pendingCount();
+            String label = count > 0 ? "Przypomnienia · " + count : "Przypomnienia";
+            tab.setText(label);
+        }
+    }
+    private void reloadReminders() { reminderUi.reload(() -> { remindersReady = true; openPendingReminder(); }); }
+    private void openPendingReminder() {
+        if (pendingReminder != null && remindersReady && state.optBoolean("ready")) {
+            String id = pendingReminder; pendingReminder = null; reminderUi.open(id);
+        }
+    }
+    private void showReminderSource(JSONObject reminder, String kind) {
+        queries.put(kind, ""); if (kind.equals("schedule")) { calendar = false; selectedDay = null; }
+        if (kind.equals("homework")) homeworkUpcoming = false;
+        select(kind);
+        for (JSONObject item : items(kind)) if (item.optString("id").equals(reminder.optString("source_id"))) { details(item, kind); return; }
+        showText("Wpis niedostępny", "Źródło nie znajduje się w pobranych danych. Przypomnienie zachowano: " + reminder.optString("title"));
+    }
     @Override protected void onDestroy() {
         if (loginDialog != null) loginDialog.dismiss();
         super.onDestroy();
@@ -85,6 +150,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         out.putString("month", month.toString());
         if (selectedDay != null) out.putString("day", selectedDay.toString());
         out.putBoolean("calendar", calendar);
+        out.putBoolean("homeworkUpcoming", homeworkUpcoming);
         out.putBoolean("loginPrompted", loginPrompted);
         Bundle values = new Bundle();
         for (Map.Entry<String, String> entry : queries.entrySet()) values.putString(entry.getKey(), entry.getValue());
@@ -104,14 +170,12 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
     private GradientDrawable background(int color) {
         GradientDrawable drawable = new GradientDrawable(); drawable.setColor(color); drawable.setCornerRadius(dp(14)); return drawable;
     }
-    private Button button(String label, Runnable action, boolean accent) {
-        Button b = new Button(this); b.setText(label); b.setAllCaps(false); b.setTextSize(13);
-        b.setTextColor(accent ? WHITE : TEAL); b.setBackground(background(accent ? TEAL : WHITE));
-        b.setMinHeight(dp(48)); b.setMinimumHeight(dp(48)); b.setPadding(dp(12), dp(8), dp(12), dp(8));
-        b.setOnClickListener(v -> action.run());
-        return b;
+    private Button button(String label, Runnable action, boolean accent) { return ButtonStyles.make(this, label, action, accent); }
+    private void weighted(LinearLayout parent, View child) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1);
+        if (child instanceof Button) params.setMargins(dp(3), dp(2), dp(3), dp(2));
+        parent.addView(child, params);
     }
-    private void weighted(LinearLayout parent, View child) { parent.addView(child, new LinearLayout.LayoutParams(0, -2, 1)); }
     private void spaced(LinearLayout parent, View child) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2); p.bottomMargin = dp(12); parent.addView(child, p);
     }
@@ -194,7 +258,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         heading.setText(title(page));
         for (Map.Entry<String, Button> tab : tabs.entrySet()) {
             boolean selected = tab.getKey().equals(page);
-            tab.getValue().setBackground(background(selected ? TEAL : WHITE)); tab.getValue().setTextColor(selected ? WHITE : TEAL);
+            ButtonStyles.style(tab.getValue(), selected);
         }
         filters.setVisibility(page.equals("overview") || page.equals("settings") ? View.GONE : View.VISIBLE);
         updatingSearch = true; search.setText(queries.getOrDefault(page, "")); updatingSearch = false;
@@ -203,6 +267,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
 
     @Override public void onState(JSONObject value) {
         state = value;
+        updateReminderBadge();
         boolean busy = state.optBoolean("busy");
         String mode = state.optString("mode", "idle");
         status.setText((mode.equals("demo") ? "DEMO · " : mode.equals("offline") ? "KOPIA LOKALNA · " : "") + state.optString("status", "Przygotowuję aplikację…"));
@@ -211,7 +276,8 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         if (mode.equals("demo")) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         else getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         int y = scroll.getScrollY(); renderList(); scroll.post(() -> scroll.scrollTo(0, y));
-        if (state.optBoolean("ready") && state.optBoolean("needs_login") && !busy && !loginPrompted) {
+        openPendingReminder();
+        if (state.optBoolean("ready") && state.optBoolean("needs_login") && (!state.optBoolean("remembered") || state.optBoolean("auto_login_blocked")) && !busy && !loginPrompted) {
             loginPrompted = true; showLogin();
         }
     }
@@ -232,6 +298,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         }
         if (page.equals("overview")) { overview(); return; }
         if (page.equals("settings")) { settings(); return; }
+        if (page.equals("reminders")) { reminderUi.render(list, queries.getOrDefault(page, "")); return; }
         String fetched = object(state, "updated_at").optString(page);
         list.addView(text(fetched.trim().isEmpty() ? "Sekcja jeszcze niepobrana" : "Ostatni odczyt: " + DisplayData.date(fetched), 12, MUTED, false));
         notice(object(state, "errors").optString(page));
@@ -241,6 +308,16 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         for (JSONObject item : all) {
             String haystack = (item.optString("title") + " " + item.optString("subtitle") + " " + item.optString("when") + " " + item.optString("details")).toLowerCase(Locale.ROOT);
             if (haystack.contains(query)) filtered.add(item);
+        }
+        if (page.equals("homework")) {
+            spaced(list, text("Zadania udostępnione przez Librusa dla bieżącego roku szkolnego. Data oznacza termin wykonania; aplikacja nie potwierdza oddania pracy.", 13, MUTED, false));
+            LinearLayout modes = row();
+            weighted(modes, button("Terminy od dziś", () -> { homeworkUpcoming = true; renderList(); }, homeworkUpcoming));
+            weighted(modes, button("Wszystkie", () -> { homeworkUpcoming = false; renderList(); }, !homeworkUpcoming)); spaced(list, modes);
+            if (homeworkUpcoming) filtered.removeIf(item -> {
+                LocalDate day = DisplayData.day(item.optString("when"));
+                return day != null && day.isBefore(LocalDate.now());
+            });
         }
         if (page.equals("schedule")) {
             LinearLayout modes = row();
@@ -255,7 +332,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
             }
         }
         Comparator<JSONObject> byDate = Comparator.comparing(item -> item.optString("when"));
-        boolean ascending = page.equals("schedule") || page.equals("timetable");
+        boolean ascending = page.equals("schedule") || page.equals("timetable") || page.equals("homework");
         filtered.sort(sort == 3 ? Comparator.comparing(item -> item.optString("title").toLowerCase(Locale.ROOT)) :
                 sort == 1 ? byDate.reversed() : sort == 2 ? byDate : ascending ? byDate : byDate.reversed());
         list.addView(text("Pozycji: " + filtered.size(), 12, MUTED, false));
@@ -274,7 +351,13 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         if (!marker.isEmpty()) c.addView(text(marker, 12, TEAL, true));
         c.addView(text(item.optString("title", "Bez tytułu"), 16, INK, true));
         c.addView(text(item.optString("subtitle"), 13, MUTED, false));
-        c.addView(text(DisplayData.date(item.optString("when")), 12, MUTED, false));
+        c.addView(text((kind.equals("homework") ? "Termin: " : "") + DisplayData.date(item.optString("when")), 12, MUTED, false));
+        if (kind.equals("homework")) {
+            LocalDate day = DisplayData.day(item.optString("when"));
+            if (day != null && day.isBefore(LocalDate.now())) c.addView(text("Termin minął", 12, MUTED, false));
+            else if (LocalDate.now().equals(day)) c.addView(text("Termin dzisiaj", 12, TEAL, true));
+            else if (LocalDate.now().plusDays(1).equals(day)) c.addView(text("Termin jutro", 12, TEAL, true));
+        }
         c.setOnClickListener(v -> details(item, kind));
         c.setContentDescription(item.optString("title") + ". Otwórz szczegóły");
         c.setFocusable(true);
@@ -297,6 +380,12 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         metric("Nieprzeczytane wiadomości", "messages", unread, "W maksymalnie 200 pobranych nagłówkach");
         metric("Pobrane oceny", "grades", items("grades").size(), "W danych udostępnionych przez szkołę");
         metric("Nadchodzące wydarzenia", "schedule", upcoming.size(), "Dzisiaj i w kolejnych dniach");
+        List<JSONObject> homework = new ArrayList<>();
+        for (JSONObject item : items("homework")) {
+            LocalDate day = DisplayData.day(item.optString("when"));
+            if (day == null || !day.isBefore(LocalDate.now())) homework.add(item);
+        }
+        metric("Zadania na dziś i później", "homework", homework.size(), "Według terminów w pobranej liście, bez potwierdzania oddania pracy");
         JSONObject errors = object(state, "errors");
         for (String key : KEYS) if (errors.has(key)) notice(title(key) + ": " + errors.optString(key));
         list.addView(text("Ostatnie oceny", 19, INK, true));
@@ -305,6 +394,9 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         list.addView(text("Najbliższe wydarzenia", 19, INK, true));
         upcoming.sort(Comparator.comparing(v -> v.optString("when")));
         for (JSONObject item : upcoming.subList(0, Math.min(4, upcoming.size()))) entry(item, "schedule");
+        list.addView(text("Najbliższe zadania domowe", 19, INK, true));
+        homework.sort(Comparator.comparing(v -> v.optString("when")));
+        for (JSONObject item : homework.subList(0, Math.min(4, homework.size()))) entry(item, "homework");
     }
     private void metric(String label, String key, long count, String note) {
         LinearLayout c = card(); c.addView(text(label, 14, MUTED, false));
@@ -354,12 +446,13 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         c.addView(button("Połącz / zmień konto", this::showLogin, true));
         c.addView(button("Włącz demo", repository::demo, false));
         c.addView(button("Usuń lokalne dane i konto", () -> new AlertDialog.Builder(this)
-                .setTitle("Usunąć lokalne dane?").setMessage("Usunięte zostaną kopia dziennika i zapamiętane konto na telefonie. Dane w Librusie pozostaną bez zmian.")
-                .setNegativeButton("Anuluj", null).setPositiveButton("Usuń", (d, w) -> repository.forget()).show(), false));
+                .setTitle("Usunąć lokalne dane?").setMessage("Usunięte zostaną kopia dziennika, zapamiętane konto i wszystkie własne przypomnienia na telefonie. Dane w Librusie pozostaną bez zmian.")
+                .setNegativeButton("Anuluj", null).setPositiveButton("Usuń", (d, w) -> { repository.forget(); foreground.postDelayed(this::reloadReminders, 1000); }).show(), false));
         LinearLayout info = card(); info.addView(text("Odświeżanie", 19, INK, true));
-        info.addView(text("Najnowsze dane pobierane są po otwarciu lub powrocie do aplikacji przy aktywnej sesji albo zapamiętanym koncie. Kolejna próba najwcześniej po minucie. Bez zapamiętanego hasła po zakończeniu procesu zaloguj się ponownie.", 15, MUTED, false));
-        info.addView(text("Ta pierwsza wersja nie odświeża w tle i nie wysyła systemowych powiadomień ani własnych alarmów. Dane i opcjonalne hasło są szyfrowane kluczem Android Keystore; kopie zapasowe systemu są wyłączone.", 14, MUTED, false));
-        LinearLayout about = card(); about.addView(text("LibrusApp Android 0.1.0", 19, INK, true));
+        info.addView(text("Najnowsze dane pobierane są po otwarciu lub powrocie do aplikacji przy aktywnej sesji albo zapamiętanym koncie. Kolejna próba najwcześniej po 5 minutach, także po ponownym uzyskaniu focusu. Otwarta aplikacja sprawdza dane co około 5 minut. Bez zapamiętanego hasła po zakończeniu procesu zaloguj się ponownie.", 15, MUTED, false));
+        info.addView(text("Własne przypomnienia działają offline i po zamknięciu aplikacji. Dane, przypomnienia i opcjonalne hasło są szyfrowane kluczem Android Keystore; kopie zapasowe systemu są wyłączone.", 14, MUTED, false));
+        notificationSettings();
+        LinearLayout about = card(); about.addView(text("LibrusApp Android 0.3.2", 19, INK, true));
         about.addView(text("Nieoficjalny klient Synergii. Kod: AGPL-3.0-or-later. Integracja wykorzystuje librus-apix i adapter projektu desktopowego.", 14, MUTED, false));
         about.addView(button("Otwórz oficjalnego Librusa", () -> openOfficial("overview"), false));
         about.addView(button("Licencje i źródła", () -> {
@@ -373,6 +466,45 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         }, false));
     }
 
+    private void notificationSettings() {
+        LinearLayout c = card(); c.addView(text("Powiadomienia i alarmy", 19, INK, true));
+        Switch data = new Switch(this); data.setText("Powiadomienia o nowych danych"); data.setChecked(NotificationHub.dataEnabled(this));
+        data.setPadding(0, dp(10), 0, dp(10)); c.addView(data);
+        data.setOnCheckedChangeListener((b, value) -> { NotificationHub.dataEnabled(this, value); if (value) requestNotificationPermission(false); });
+        Switch background = new Switch(this); background.setText("Pobieraj dane w tle"); background.setChecked(BackgroundSync.enabled(this));
+        background.setPadding(0, dp(10), 0, dp(10)); c.addView(background);
+        background.setOnCheckedChangeListener((b, value) -> {
+            if (value && (!state.optBoolean("remembered") || state.optString("mode").equals("demo"))) {
+                background.setChecked(false); Toast.makeText(this, "Połącz konto z opcją zapamiętania. Demo nie pobiera danych w tle.", Toast.LENGTH_LONG).show(); return;
+            }
+            try { BackgroundSync.enabled(this, value); }
+            catch (Exception e) { background.setChecked(false); Toast.makeText(this, "Android nie przyjął harmonogramu odświeżania.", Toast.LENGTH_LONG).show(); }
+        });
+        c.addView(text("W tle: około co 15 minut, również po zamknięciu aplikacji, tylko z dostępem do internetu. Android może opóźniać odczyty. Pierwsze pobranie i brak zmian są ciche; powiadomienie zawiera tylko liczby zmian.", 13, MUTED, false));
+        c.addView(text(NotificationHub.allowed(this, NotificationHub.REMINDERS) ? "Powiadomienia przypomnień dostępne w Androidzie." : "Powiadomienia przypomnień zablokowane w Androidzie.", 13, MUTED, false));
+        spaced(c, button("Test powiadomienia", () -> requestNotificationPermission(true), true));
+        spaced(c, button("Ustawienia powiadomień Androida", () -> NotificationHub.settings(this), false));
+        c.addView(text(ReminderAlarms.exact(this) ? "Dokładne alarmy: dostępne." : "Dokładne alarmy: brak zgody — możliwe opóźnienie.", 13, MUTED, false));
+        spaced(c, button("Zgoda na dokładne alarmy", () -> { if (ReminderAlarms.exact(this)) Toast.makeText(this, "Dokładne alarmy są już dostępne.", Toast.LENGTH_SHORT).show(); else ReminderAlarms.requestExact(this); }, false));
+        c.addView(text("Tryb Nie przeszkadzać i oszczędzanie baterii mogą wyciszać lub opóźniać alerty. Po wymuszonym zatrzymaniu otwórz aplikację ponownie. Przypomnienia mają oddzielny kanał i nie zależą od powiadomień o nowych danych.", 13, MUTED, false));
+        notice(NotificationHub.error(this));
+    }
+    private void requestNotificationPermission(boolean test) {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, test ? 411 : 410); return;
+        }
+        if (test) testNotification();
+    }
+    private void testNotification() {
+        String result = NotificationHub.test(this);
+        Toast.makeText(this, result.equals("sent") ? "Przekazano test do Androida. Widoczność zależy od ustawień systemu." : "Android blokuje powiadomienia. Sprawdź ustawienia aplikacji i kanału przypomnień.", Toast.LENGTH_LONG).show();
+    }
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(request, permissions, grants);
+        if (request == 411 && grants.length > 0 && grants[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) testNotification();
+        if (request == 410 || request == 411) { renderList(); if (grants.length == 0 || grants[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) Toast.makeText(this, "Bez zgody Android nie pokaże powiadomień. Przypomnienia pozostają na liście.", Toast.LENGTH_LONG).show(); }
+    }
+
     private void details(JSONObject item, String kind) {
         Dialog dialog = new Dialog(this);
         LinearLayout body = column(); body.setPadding(dp(18), dp(16), dp(18), dp(16)); body.setBackgroundColor(WHITE);
@@ -384,11 +516,19 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
             Button read = button("Pobierz treść", () -> { dialog.dismiss(); repository.readMessage(item.optString("id")); }, true);
             read.setEnabled(!state.optBoolean("busy")); body.addView(read);
         }
+        if (kind.equals("homework") && !item.optBoolean("body_loaded")) {
+            Button read = button("Pobierz treść zadania", () -> { dialog.dismiss(); repository.readHomework(item.optString("id")); }, true);
+            read.setEnabled(!state.optBoolean("busy")); body.addView(read);
+        }
+        if (java.util.Arrays.asList("messages", "announcements", "schedule", "homework").contains(kind)) {
+            Button remind = button("Przypomnij mi…", () -> { dialog.dismiss(); reminderUi.add(item, kind); }, false);
+            LinearLayout.LayoutParams remindParams = new LinearLayout.LayoutParams(-1, -2); remindParams.topMargin = dp(8); remindParams.bottomMargin = dp(8); body.addView(remind, remindParams);
+        }
         ScrollView detailScroll = new ScrollView(this);
         TextView content = text(item.optString("details", "Brak dodatkowego opisu."), 16, INK, false); content.setTextIsSelectable(true);
         detailScroll.addView(content); body.addView(detailScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout actions = row();
-        weighted(actions, button("Otwórz w Librusie", () -> openOfficial(kind), false));
+        weighted(actions, button("Otwórz w Librusie", () -> { if (kind.equals("homework")) openHomework(item.optString("id")); else openOfficial(kind); }, false));
         weighted(actions, button("Zamknij", dialog::dismiss, false)); body.addView(actions);
         dialog.setContentView(body); dialog.show();
         dialog.getWindow().setLayout(-1, (int) (getResources().getDisplayMetrics().heightPixels * 0.85));
@@ -422,6 +562,23 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
         if (content.has("error")) new AlertDialog.Builder(this).setTitle("Nie pobrano treści").setMessage(content.optString("error")).setPositiveButton("OK", null).show();
         else showText(content.optString("title", "Wiadomość"), content.optString("text", "Brak treści."));
     }
+    @Override public void onHomework(JSONObject content) {
+        if (content.has("error")) { showText("Nie pobrano treści zadania", content.optString("error")); return; }
+        for (JSONObject item : items("homework")) if (item.optString("id").equals(content.optString("id"))) {
+            try {
+                JSONObject detail = new JSONObject(item.toString());
+                detail.put("details", item.optString("details") + "\n\n" + content.optString("text")).put("body_loaded", true);
+                details(detail, "homework");
+            } catch (Exception ignored) { showText("Zadanie domowe", content.optString("text")); }
+            return;
+        }
+        showText("Zadanie niedostępne", "Zadanie nie znajduje się już w pobranej liście.");
+    }
+    private void openHomework(String id) {
+        if (!id.matches("homework:[0-9]{1,20}")) { openOfficial("homework"); return; }
+        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://synergia.librus.pl/moje_zadania/podglad/" + id.substring("homework:".length())))); }
+        catch (Exception error) { Toast.makeText(this, "Brak przeglądarki do otwarcia Librusa.", Toast.LENGTH_LONG).show(); }
+    }
     private void showText(String title, String content) {
         JSONObject item = new JSONObject();
         try { item.put("title", title).put("details", content); } catch (Exception ignored) { }
@@ -433,6 +590,7 @@ public final class MainActivity extends Activity implements MobileRepository.Lis
             case "messages" -> "wiadomosci3";
             case "announcements" -> "ogloszenia";
             case "schedule" -> "terminarz/";
+            case "homework" -> "moje_zadania";
             case "attendance" -> "przegladaj_nb/uczen";
             case "timetable" -> "przegladaj_plan_lekcji";
             default -> "";

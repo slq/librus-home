@@ -24,6 +24,7 @@ from librus_apix.attendance import get_attendance
 from librus_apix.client import Client, Token
 from librus_apix.exceptions import AuthorizationError, TokenError, TokenKeyError
 from librus_apix.grades import get_grades
+from librus_apix.homework import get_homework, homework_detail
 from librus_apix.schedule import get_schedule
 from librus_apix.timetable import get_timetable
 
@@ -39,6 +40,7 @@ SECTION_URLS = {
     "schedule": "https://synergia.librus.pl/terminarz/",
     "attendance": "https://synergia.librus.pl/przegladaj_nb/uczen",
     "timetable": "https://synergia.librus.pl/przegladaj_plan_lekcji",
+    "homework": "https://synergia.librus.pl/moje_zadania",
 }
 MESSAGE_API = "https://wiadomosci.librus.pl/api/inbox/messages"
 LOGIN_ENTRY_URL = "https://synergia.librus.pl/loguj/portalRodzina"
@@ -365,6 +367,22 @@ def _iso(value, *, optional: bool = False) -> str:
     raise _parse_error()
 
 
+def _homework_date(value) -> str:
+    # apix combines the date and the adjacent weekday/time column. Keep valid
+    # times, but remove only recognised weekday labels from date-only values.
+    value = re.sub(r"\s+-+$", "", plain_text(value))
+    try:
+        return _iso(value)
+    except ConnectorError:
+        match = re.fullmatch(r"(.+?)\s+\(?([a-ząćęłńóśźż.]+)\)?", value, re.IGNORECASE)
+        weekdays = {"poniedziałek", "wtorek", "środa", "sroda", "czwartek",
+                    "piątek", "piatek", "sobota", "niedziela",
+                    "pon", "pn", "wt", "śr", "sr", "czw", "pt", "sob", "nd", "niedz"}
+        if match and match[2].casefold().rstrip(".") in weekdays:
+            return _iso(match[1])
+        raise
+
+
 def _identifier(kind: str, *identity) -> str:
     raw = json.dumps(identity, ensure_ascii=False, sort_keys=True, default=str)
     return kind + ":" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
@@ -456,7 +474,7 @@ class LibrusConnector:
         methods = {"grades": self._grades, "messages": self._messages,
                    "announcements": self._announcements,
                    "schedule": self._schedule, "attendance": self._attendance,
-                   "timetable": self._timetable}
+                   "timetable": self._timetable, "homework": self._homework}
         if kind not in methods:
             raise ConnectorError("Nieobsługiwana sekcja danych.")
         try:
@@ -559,6 +577,53 @@ class LibrusConnector:
                     result.append(_item("schedule", _identifier("schedule", *identity),
                         event.title or event.subject, event.subject, when, details))
         return result
+
+    def _homework(self):
+        # The filter is supplied to Librus for the current school year. Do not
+        # fetch every assignment's detail page during periodic synchronization.
+        today = date.today()
+        year = today.year if today.month >= 9 else today.year - 1
+        rows = get_homework(self._client, date(year, 9, 1).isoformat(), date(year + 1, 8, 31).isoformat())
+        if not isinstance(rows, list):
+            raise _parse_error()
+        result = []
+        for row in rows:
+            raw_id = str(row.href)
+            if not re.fullmatch(r"[0-9]{1,20}", raw_id):
+                raise _parse_error()
+            # apix names the first table column 'lesson' (school subject),
+            # and the third 'subject' (assignment topic).
+            subject, topic, teacher = plain_text(row.lesson), plain_text(row.subject), plain_text(row.teacher)
+            if not topic:
+                raise _parse_error()
+            due = _homework_date(row.completion_date)
+            assigned = _homework_date(row.task_date)
+            details = _description({"Przedmiot": subject, "Temat": topic, "Nauczyciel": teacher,
+                                    "Kategoria": row.category, "Dodano": assigned, "Termin wykonania": due})
+            details += "\nPełna treść dostępna po wybraniu Pobierz treść zadania. Załączniki i wysyłanie rozwiązania dostępne w oficjalnym Librusie."
+            item = _item("homework", "homework:" + raw_id, topic, " · ".join(filter(None, (subject, teacher))), due, details)
+            item["url"] = SECTION_URLS["homework"] + "/podglad/" + raw_id
+            result.append(item)
+        return result
+
+    def read_homework(self, item_id: str) -> dict:
+        self._require_connected()
+        if not isinstance(item_id, str) or not re.fullmatch(r"homework:[0-9]{1,20}", item_id):
+            raise ConnectorError("Nieprawidłowy identyfikator zadania domowego.")
+        try:
+            values = homework_detail(self._client, item_id.split(":", 1)[1])
+            if not isinstance(values, Mapping) or not values:
+                raise _parse_error()
+            text = _description(values)
+            if not text:
+                raise _parse_error()
+            return {"text": text + "\n\nZałączniki i wysyłanie rozwiązania dostępne w oficjalnym Librusie."}
+        except ConnectorError:
+            raise
+        except (AuthorizationError, TokenError, TokenKeyError):
+            raise ConnectorError("Sesja Librusa wygasła. Połącz konto ponownie.", requires_login=True) from None
+        except Exception:
+            raise _parse_error() from None
 
     def _timetable(self):
         today = date.today()
