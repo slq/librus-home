@@ -1,0 +1,6 @@
+# lxml is supplied as an Android wheel; aiohttp has CPython 3.13 Android wheels.
+librus-apix==1.5.3
+requests==2.34.2
+beautifulsoup4==4.15.0
+lxml==5.3.0
+aiohttp==3.14.4

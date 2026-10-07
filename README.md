@@ -1,10 +1,12 @@
 # Librus Home
 
-Repozytorium lokalnej aplikacji **LibrusApp** do konta LIBRUS Synergia. Aplikacja jest napisana w Pythonie i korzysta z Tkinter; pokazuje dane dziennika w jednym oknie na Windows oraz przypomina o ważnych sprawach.
+Repozytorium aplikacji **LibrusApp** do konta LIBRUS Synergia: wersji desktopowej dla Windows oraz mobilnej dla Androida. Obie pokazują dane dziennika i przechowują zaszyfrowaną kopię na urządzeniu.
 
-Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Aktualna wersja aplikacji: **0.1.1**; status: prototyp rozwijany i sprawdzany lokalnie.
+Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Wersja desktopowa: **0.1.1**, Android: **0.1.0**. Status: prototypy rozwijane i sprawdzane lokalnie.
 
 ## Możliwości
+
+Repozytorium zawiera dwie aplikacje: [LibrusApp dla Windows](librus-app/README.md) i [LibrusApp dla Androida](librus-android/README.md). Wersja Android ma APK do instalacji przez USB, z logowaniem i odczytem danych po otwarciu. Jej [zakres pierwszej wersji](librus-android/MVP_SCOPE.md) opisuje adaptację wymagań desktopu.
 
 - Oceny, wiadomości, ogłoszenia, frekwencja i plan lekcji.
 - Terminarz w widoku kalendarza z listą poniżej lub samej listy.
@@ -14,7 +16,7 @@ Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z produce
 - Zaszyfrowana kopia lokalna danych i opcjonalne zapamiętanie konta przez Windows DPAPI.
 - Tryb demo z fikcyjnymi danymi, bez logowania do Librusa.
 
-## Szybki start
+## Szybki start — Windows
 
 Potrzebujesz Windows i standardowego Pythona **3.11 lub nowszego** z `pip` oraz `tkinter`. Testy uruchamiane są na Pythonie 3.12.
 
@@ -35,19 +37,28 @@ Przy pierwszym uruchomieniu skrypt tworzy `.venv` i instaluje zależności z PyP
 librus-home/
 ├── README.md
 ├── .gitignore
-└── librus-app/
+├── librus-app/               # Aplikacja Windows
+│   ├── README.md
+│   ├── USER_STORIES.md
+│   ├── Start.cmd
+│   ├── Demo.cmd
+│   ├── Sprawdz-srodowisko.cmd
+│   ├── requirements.txt
+│   ├── requirements-dev.txt
+│   ├── librus_app/
+│   ├── tests/
+│   ├── LICENSE
+│   ├── THIRD_PARTY_NOTICES.md
+│   └── licenses/
+└── librus-android/           # Aplikacja Android
     ├── README.md
-    ├── USER_STORIES.md
-    ├── Start.cmd
-    ├── Demo.cmd
-    ├── Sprawdz-srodowisko.cmd
-    ├── requirements.txt
-    ├── requirements-dev.txt
-    ├── librus_app/            # Kod aplikacji
-    ├── tests/                 # Testy na danych syntetycznych
-    ├── LICENSE
-    ├── THIRD_PARTY_NOTICES.md
-    └── licenses/
+    ├── MVP_SCOPE.md
+    ├── TESTING.md
+    ├── Build.ps1
+    ├── Install-USB.ps1
+    ├── app/
+    ├── tests/
+    └── tools/
 ```
 
 ## Rozwój i testy
