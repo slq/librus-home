@@ -9,7 +9,9 @@ public final class ReminderReceiver extends BroadcastReceiver {
         ReminderAlarms.execute(() -> {
             try {
                 if ("pl.librushome.android.REMIND".equals(intent.getAction())) ReminderAlarms.fire(app, intent.getStringExtra("id"));
-                else ReminderAlarms.restore(app);
+                else if ("pl.librushome.android.SNOOZE".equals(intent.getAction()))
+                    ReminderAlarms.snooze(app, intent.getStringExtra("id"), intent.getLongExtra("fired_at", -1), intent.getLongExtra("due", -1));
+                else { ReminderAlarms.restore(app); GoogleCalendarSync.request(app,null); }
                 NotificationHub.error(app, "");
                 if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
                     try { BackgroundSync.configure(app, BackgroundSync.enabled(app)); }

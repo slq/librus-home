@@ -143,6 +143,53 @@ class MobileTests(unittest.TestCase):
         self.assertTrue(self.service.state()["needs_login"])
         self.assertTrue(self.service.tracker.sections["grades"])
 
+    def test_remembered_expiry_can_reconnect_on_next_attempt_without_replaying_changes(self):
+        client = self.connect(remember=True)
+        snapshot = copy.deepcopy(self.service.tracker.sections)
+        client.errors["grades"] = ConnectorError("Synthetic expired session", requires_login=True)
+        self.service.open()
+        self.assertTrue(self.service.state()["needs_login"])
+        self.assertTrue(self.service.state()["remembered"])
+        self.assertFalse(self.service.auto_login_blocked)
+        self.assertEqual(self.service.tracker.sections, snapshot)
+        self.assertEqual(len(FakeConnector.created), 1)
+        self.service.open()
+        self.assertTrue(self.service.state()["connected"])
+        self.assertEqual(len(FakeConnector.created), 2)
+        self.assertEqual(sum(self.service.last_changes.values()), 0)
+
+    def test_newly_authenticated_session_failure_stops_reconnection_loop(self):
+        client = self.connect(remember=True)
+        client.errors["grades"] = ConnectorError("Synthetic expired session", requires_login=True)
+        self.service.open()
+        def rejected_session(login, password):
+            candidate = FakeConnector(login, password)
+            candidate.errors["grades"] = ConnectorError("Synthetic denied fresh session", requires_login=True)
+            return candidate
+        self.service.factory = rejected_session
+        self.service.open()
+        self.assertEqual(len(FakeConnector.created), 2)
+        self.assertTrue(self.service.auto_login_blocked)
+        for _ in range(3):
+            self.service.open()
+        restored = MobileService(factory=rejected_session, clock=lambda: self.now)
+        restored.restore_json(self.service.export_json())
+        restored.open()
+        self.assertEqual(len(FakeConnector.created), 2)
+
+    def test_pending_session_recovery_obeys_rate_limit(self):
+        client = self.connect(remember=True)
+        client.errors["grades"] = ConnectorError("Synthetic expired session", requires_login=True)
+        self.service.open()
+        self.service.retry_after = self.now + 3600
+        self.service.open()
+        self.assertEqual(len(FakeConnector.created), 1)
+        self.assertFalse(self.service.auto_login_blocked)
+        self.now += 3600
+        self.service.open()
+        self.assertTrue(self.service.state()["connected"])
+        self.assertEqual(len(FakeConnector.created), 2)
+
     def test_body_is_explicit_and_never_exported(self):
         client = self.connect()
         self.assertEqual(client.body_reads, 0)

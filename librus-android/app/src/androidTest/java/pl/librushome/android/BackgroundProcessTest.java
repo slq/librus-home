@@ -20,10 +20,10 @@ public class BackgroundProcessTest {
             assertTrue("Use an emulator without a school account",saved.isNull("credentials")&&saved.optString("profile").isEmpty());
         }
         if(phase.equals("seed")){
-            BackgroundSync.enabled(c,true);
+            BackgroundSync.nightEnabled(c,false);BackgroundSync.enabled(c,true);
             // Instrumentation terminates the target process immediately; flush
             // this fixture's setting before testing a genuine cold launch.
-            assertTrue(c.getSharedPreferences("notification_options",Context.MODE_PRIVATE).edit().putBoolean("background",true).commit());
+            assertTrue(c.getSharedPreferences("notification_options",Context.MODE_PRIVATE).edit().putBoolean("background",true).putBoolean("night_pause",false).commit());
             android.app.job.JobInfo job=c.getSystemService(android.app.job.JobScheduler.class).getPendingJob(BackgroundSync.JOB_ID);
             assertNotNull(job);assertEquals(900000,job.getIntervalMillis());return;
         }
@@ -31,6 +31,6 @@ public class BackgroundProcessTest {
             assertFalse("Run the job after the seed instrumentation has ended",BackgroundSync.enabled(c));
             assertNull(c.getSystemService(android.app.job.JobScheduler.class).getPendingJob(BackgroundSync.JOB_ID));
             assertEquals("Background execution must not create account data",raw,new SecureStore(c).read());
-        } finally {BackgroundSync.enabled(c,false);}
+        } finally {BackgroundSync.enabled(c,false);BackgroundSync.nightEnabled(c,true);}
     }
 }

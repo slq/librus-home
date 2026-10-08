@@ -52,6 +52,13 @@ public final class ReminderAlarms {
             store.delivered(id, item.optLong("fired_at"), outcome);
         }
     }
+    public static void snooze(Context c, String id, long firedAt, long due) throws Exception {
+        synchronized (ReminderStore.LOCK) {
+            JSONObject item = new ReminderStore(c).snooze(id, firedAt, due, System.currentTimeMillis());
+            if (item != null) schedule(c, item);
+        }
+        GoogleCalendarSync.request(c,null);
+    }
     public static void clear(Context c) throws Exception {
         synchronized (ReminderStore.LOCK) {
             ReminderStore store = new ReminderStore(c);

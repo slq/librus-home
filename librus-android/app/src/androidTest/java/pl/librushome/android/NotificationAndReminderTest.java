@@ -46,11 +46,30 @@ public class NotificationAndReminderTest {
             assertEquals("pending",edited.getString("status"));assertFalse(edited.has("fired_at"));assertNotNull(reopened.claim(id,5000));
         } finally { pool.shutdownNow(); }
     }
+    @Test public void snoozeIsPersistentIdempotentAndRejectsDeletedOrEditedNotifications() throws Exception {
+        JSONObject reminder=create();String id=reminder.getString("id");
+        assertNull(store.snooze(id,2000,2000,3000)); // Unfired reminders cannot be snoozed.
+        store.claim(id,2000);
+        JSONObject later=store.snooze(id,2000,2000,3000);
+        assertNotNull(later);assertEquals(1803000,later.getLong("due"));assertEquals("pending",later.getString("status"));
+        assertEquals("synthetic-profile",later.getString("profile"));assertFalse(later.has("fired_at"));
+        assertNull(store.snooze(id,2000,2000,4000)); // Replayed action must not push the date further.
+        assertEquals(1803000,new ReminderStore(context,"test-only-reminders.aes","LibrusApp.test-only.reminders").get(id).getLong("due"));
+        assertNull(store.claim(id,1802999));store.claim(id,1803000);
+        assertNull(store.snooze(id,2000,2000,1804000)); // Old notification after a second firing.
+        store.save(id,"messages","synthetic-source","synthetic-profile",true,"title","note",1900000,false,1804000);
+        assertNull(store.snooze(id,1803000,1803000,1805000)); // Old action after editing.
+        store.delete(id);assertNull(store.snooze(id,1803000,1803000,1806000));
+    }
     @Test public void defaultReminderNotificationDoesNotDiscloseSourceOrText() throws Exception {
         JSONObject item=create().put("id","test-reminder-privacy");
         assertEquals("sent",NotificationHub.reminder(context,item));
         android.service.notification.StatusBarNotification found=null;
-        for(android.service.notification.StatusBarNotification n:NotificationHub.manager(context).getActiveNotifications())if("test-reminder-privacy".equals(n.getTag()))found=n;
+        long publishedDeadline=System.currentTimeMillis()+3000;
+        while(found==null && System.currentTimeMillis()<publishedDeadline) {
+            for(android.service.notification.StatusBarNotification n:NotificationHub.manager(context).getActiveNotifications())if("test-reminder-privacy".equals(n.getTag()))found=n;
+            if(found==null)Thread.sleep(50);
+        }
         assertNotNull(found);Notification notification=found.getNotification();
         assertFalse(notification.extras.toString().contains("SYNTHETIC_PRIVATE_NOTE"));assertFalse(notification.extras.toString().contains("SYNTHETIC_SCHOOL_TITLE"));
         assertEquals(Notification.VISIBILITY_PRIVATE,notification.visibility);assertNotNull(notification.contentIntent);
@@ -76,14 +95,14 @@ public class NotificationAndReminderTest {
                 }
                 Thread.sleep(50);
             }
-            BackgroundSync.enabled(context,true);
+            BackgroundSync.nightEnabled(context,false);BackgroundSync.enabled(context,true);
             assertNotNull(context.getSystemService(android.app.job.JobScheduler.class).getPendingJob(BackgroundSync.JOB_ID));
             CountDownLatch finished=new CountDownLatch(1);
             InstrumentationRegistry.getInstrumentation().runOnMainSync(()->MobileRepository.get(context).backgroundRefresh(finished::countDown));
             assertTrue("Background request did not finish",finished.await(10,TimeUnit.SECONDS));
             assertFalse(BackgroundSync.enabled(context));
             assertNull(context.getSystemService(android.app.job.JobScheduler.class).getPendingJob(BackgroundSync.JOB_ID));
-        } finally { BackgroundSync.enabled(context,false); }
+        } finally { BackgroundSync.enabled(context,false);BackgroundSync.nightEnabled(context,true); }
     }
 
 }

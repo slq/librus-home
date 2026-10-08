@@ -58,6 +58,10 @@ public final class ReminderUi {
         });
     }
     public int pendingCount() { int count=0; for(int i=0;i<rows.length();i++){JSONObject r=rows.optJSONObject(i);if(r!=null&&belongs(r)&&r.optString("status").equals("pending"))count++;} return count; }
+    public List<JSONObject> calendarItems() {
+        return CalendarData.combine(Collections.emptyList(),Collections.emptyList(),rows,profile(),demo());
+    }
+    public String calendarError() { return loadError; }
     public void render(LinearLayout parent, String query) {
         space(parent,text("Zaplanowane: "+pendingCount(),14,0xff64748b));
         if(!loadError.isEmpty())space(parent,text(loadError,14,0xff994835));
@@ -102,6 +106,7 @@ public final class ReminderUi {
             String result;
             try { synchronized(ReminderStore.LOCK){new ReminderStore(activity).delete(row.optString("id"));ReminderAlarms.cancel(activity,row.optString("id"));}result="Usunięto przypomnienie."; }
             catch(Exception e){result="Nie usunięto przypomnienia. Zmiana nie została zapisana.";}
+            GoogleCalendarSync.request(activity.getApplicationContext(),null);
             String message=result;activity.runOnUiThread(()->{if(!activity.isDestroyed()){toast(message);reload(null);}});
         });
     }
@@ -121,15 +126,42 @@ public final class ReminderUi {
         timeButton.setOnClickListener(v->new TimePickerDialog(activity,(picker,h,m)->{time[0]=LocalTime.of(h,m);update.run();},time[0].getHour(),time[0].getMinute(),true).show());
         LinearLayout dates=new LinearLayout(activity);LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,-2,1);left.rightMargin=dp(8);dates.addView(dateButton,left);dates.addView(timeButton,new LinearLayout.LayoutParams(0,-2,1));space(form,dates);
         form.addView(text("Czas telefonu: "+ZoneId.systemDefault().getId(),12,0xff64748b));
-        LinearLayout shortcuts=new LinearLayout(activity);
-        String[] names={"Za godzinę","Jutro 08:00","Za tydzień"};
-        for(int i=0;i<3;i++){final int choice=i;Button b=ButtonStyles.make(activity,names[i],()->{
-            ZonedDateTime next=ZonedDateTime.now().plusHours(1);if(choice==1)next=ZonedDateTime.now().plusDays(1).withHour(8).withMinute(0);if(choice==2)next=ZonedDateTime.now().plusWeeks(1);
-            day[0]=next.toLocalDate();time[0]=next.toLocalTime().withSecond(0).withNano(0);update.run();},false);
-            b.setTextSize(11);b.setPadding(dp(4),dp(6),dp(4),dp(6));LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.setMargins(dp(2),0,dp(2),0);shortcuts.addView(b,lp);
-        }space(form,shortcuts);
+        TextView error=text("",14,0xff994835);
+        String sourceWhen=existing==null?source.optString("when"):existing.optString("source_when");
+        if (sourceWhen.isEmpty() && (existing==null || belongs(existing))) {
+            JSONObject sections=current.get().optJSONObject("sections");
+            JSONArray entries=sections==null?null:sections.optJSONArray(kind);
+            if(entries!=null)for(int i=0;i<entries.length();i++) {
+                JSONObject item=entries.optJSONObject(i);
+                if(item!=null&&item.optString("id").equals(sourceId)) { sourceWhen=item.optString("when");break; }
+            }
+        }
+        final String deadline=sourceWhen;
+        String[] names={"Za 30 minut","Za godzinę","Jutro 08:00","Za tydzień"};
+        for(int pair=0;pair<2;pair++) {
+            LinearLayout shortcuts=new LinearLayout(activity);
+            for(int i=pair*2;i<pair*2+2;i++){final int choice=i;Button b=ButtonStyles.make(activity,names[i],()->{
+                ZonedDateTime now=ZonedDateTime.now();ZonedDateTime next=choice==0?now.plusMinutes(30):choice==1?now.plusHours(1):choice==2?now.plusDays(1).withHour(8).withMinute(0):now.plusWeeks(1);
+                day[0]=next.toLocalDate();time[0]=next.toLocalTime().withSecond(0).withNano(0);error.setText("");update.run();},false);
+                LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,-2,1);lp.setMargins(dp(3),0,dp(3),0);shortcuts.addView(b,lp);
+            }space(form,shortcuts);
+        }
+        if((kind.equals("schedule")||kind.equals("homework"))&&!deadline.isEmpty()) {
+            space(form,text("Względem terminu: "+DisplayData.date(deadline),13,0xff64748b));
+            String[] relative={"Dzień wcześniej o 18:00","Godzinę wcześniej"};
+            for(int i=0;i<(ReminderTimes.hasTime(deadline)?2:1);i++) {
+                final boolean evening=i==0;
+                space(form,ButtonStyles.make(activity,relative[i],()->{
+                    try {
+                        long at=ReminderTimes.beforeEvent(deadline,evening,ZoneId.systemDefault(),System.currentTimeMillis());
+                        ZonedDateTime next=Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault());
+                        day[0]=next.toLocalDate();time[0]=next.toLocalTime().withSecond(0).withNano(0);error.setText("");update.run();
+                    }catch(IllegalArgumentException invalid){error.setText(invalid.getMessage());}
+                },false));
+            }
+        }
         CheckBox showText=new CheckBox(activity);showText.setText("Pokaż mój tekst w powiadomieniu");showText.setChecked(existing!=null&&existing.optBoolean("show_text"));space(form,showText);
-        TextView error=text("",14,0xff994835);form.addView(error);
+        form.addView(error);
         ScrollView scroller=new ScrollView(activity);scroller.addView(form);
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(existing==null?"Nowe przypomnienie":"Edytuj przypomnienie").setView(scroller).setNegativeButton("Anuluj",null).setPositiveButton("Zapisz",null).create();dialog.show();secure(dialog);
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
@@ -140,10 +172,11 @@ public final class ReminderUi {
             if(Build.VERSION.SDK_INT>=33&&activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)activity.requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},410);
             ReminderAlarms.execute(()->{
                 String result;
-                try { synchronized(ReminderStore.LOCK){JSONObject saved=new ReminderStore(activity).save(id,kind,sourceId,accountProfile,isDemo,title,content,at,reveal,System.currentTimeMillis());
+                try { synchronized(ReminderStore.LOCK){JSONObject saved=new ReminderStore(activity).save(id,kind,sourceId,accountProfile,isDemo,title,content,at,reveal,System.currentTimeMillis(),deadline);
                     try { ReminderAlarms.schedule(activity,saved);result="Zapisano przypomnienie."; }
                     catch(Exception scheduleFailure){result="Zapisano przypomnienie, ale Android nie przyjął alarmu. Otwórz listę przypomnień, aby ponowić planowanie.";}}
                 }catch(Exception e){result="Nie zapisano przypomnienia. Poprzedni zapis pozostał bez zmian.";}
+                GoogleCalendarSync.request(activity.getApplicationContext(),null);
                 String message=result;activity.runOnUiThread(()->{if(!activity.isDestroyed()){toast(message);reload(null);}});
             });
         });

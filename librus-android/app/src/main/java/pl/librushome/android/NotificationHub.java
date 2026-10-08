@@ -25,15 +25,19 @@ public final class NotificationHub {
         return manager(c).areNotificationsEnabled() && value != null && value.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
     private static String post(Context c, String channel, String tag, String title, String text, Intent open) {
+        return post(c, channel, tag, title, text, open, null);
+    }
+    private static String post(Context c, String channel, String tag, String title, String text, Intent open, Notification.Action action) {
         if (!allowed(c, channel)) return "blocked";
         PendingIntent tap = PendingIntent.getActivity(c, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification publicCopy = new Notification.Builder(c, channel).setSmallIcon(pl.librushome.android.R.drawable.ic_notification)
                 .setContentTitle("LibrusApp").setContentText("Otwórz aplikację, aby zobaczyć szczegóły.").setVisibility(Notification.VISIBILITY_PUBLIC).build();
-        Notification value = new Notification.Builder(c, channel).setSmallIcon(pl.librushome.android.R.drawable.ic_notification)
+        Notification.Builder builder = new Notification.Builder(c, channel).setSmallIcon(pl.librushome.android.R.drawable.ic_notification)
                 .setContentTitle(title).setContentText(text).setStyle(new Notification.BigTextStyle().bigText(text))
                 .setAutoCancel(true).setContentIntent(tap).setVisibility(Notification.VISIBILITY_PRIVATE)
-                .setPublicVersion(publicCopy).setCategory(channel.equals(REMINDERS) ? Notification.CATEGORY_REMINDER : Notification.CATEGORY_STATUS).build();
-        try { manager(c).notify(tag, 1, value); return "sent"; }
+                .setPublicVersion(publicCopy).setCategory(channel.equals(REMINDERS) ? Notification.CATEGORY_REMINDER : Notification.CATEGORY_STATUS);
+        if (action != null) builder.addAction(action);
+        try { manager(c).notify(tag, 1, builder.build()); return "sent"; }
         catch (SecurityException e) { return "blocked"; }
     }
     private static Intent open(Context c, String path) {
@@ -43,7 +47,15 @@ public final class NotificationHub {
     public static String reminder(Context c, JSONObject item) {
         Intent intent = open(c, "reminder/" + item.optString("id")).putExtra("reminder_id", item.optString("id"));
         String text = item.optBoolean("show_text") ? item.optString("note") : "Masz zaplanowane przypomnienie. Otwórz LibrusApp.";
-        return post(c, REMINDERS, item.optString("id"), "LibrusApp · Przypomnienie", text, intent);
+        Notification.Action action = null;
+        if (item.optString("status").equals("fired") && item.has("fired_at")) {
+            Intent snooze = new Intent(c, ReminderReceiver.class).setAction("pl.librushome.android.SNOOZE")
+                    .setData(android.net.Uri.parse("librusapp://snooze/" + item.optString("id") + "/" + item.optLong("fired_at") + "/" + item.optLong("due")))
+                    .putExtra("id", item.optString("id")).putExtra("fired_at", item.optLong("fired_at")).putExtra("due", item.optLong("due"));
+            PendingIntent later = PendingIntent.getBroadcast(c, 0, snooze, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            action = new Notification.Action.Builder(null, "Przypomnij za 30 minut", later).build();
+        }
+        return post(c, REMINDERS, item.optString("id"), "LibrusApp · Przypomnienie", text, intent, action);
     }
     public static String changes(Context c, JSONObject changes) {
         String[] keys = {"grades", "messages", "announcements", "schedule", "attendance", "timetable", "homework"};

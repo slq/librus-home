@@ -50,18 +50,41 @@ public class HomeworkTest {
         Intent intent=new Intent(context(),MainActivity.class).putExtra("demo",true);
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(intent)){
             waitText("DEMO ·");
-            waitText("Nieprzeczytane wiadomości");
-            scenario.onActivity(a->{View tab=find(a.getWindow().getDecorView(),"Zadania domowe",true);assertNotNull(tab);tab.performClick();});
+            waitText("Dzisiaj");
+            scenario.onActivity(a->{NavigationTestSupport.open(a,"Zadania domowe");});
             scenario.onActivity(a->{View root=a.getWindow().getDecorView();assertNotNull(find(root,"Ćwiczenia z ułamków",false));assertNull(find(root,"Powtórka słownictwa",false));View all=find(root,"Wszystkie",true);assertNotNull(all);all.performClick();assertNotNull(find(root,"Powtórka słownictwa",false));assertNotNull(find(root,"Termin minął",false));});
             scenario.onActivity(a->{View label=find(a.getWindow().getDecorView(),"Ćwiczenia z ułamków",false);assertNotNull(label);assertTrue(((View)label.getParent()).performClick());});
             click("Pobierz treść zadania");waitText("Przykładowa treść zadania");
-            click("Przypomnij mi…");waitText("Nowe przypomnienie");enterNote(root());click("Zapisz");
+            click("Przypomnij mi…");waitText("Nowe przypomnienie");
+            waitText("Za 30 minut");waitText("Godzinę wcześniej");
+            click("Godzinę wcześniej");enterNote(root());click("Zapisz");
             long deadline=System.currentTimeMillis()+5000;JSONObject reminder=null;
             while(System.currentTimeMillis()<deadline&&reminder==null){JSONArray rows=new ReminderStore(context()).list();for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).optString("note").equals(NOTE))reminder=rows.getJSONObject(i);if(reminder==null)Thread.sleep(50);}
             assertNotNull("Homework reminder not saved",reminder);assertEquals("homework",reminder.getString("kind"));assertEquals("demo:homework:h1",reminder.getString("source_id"));
-            scenario.onActivity(a->{View root=a.getWindow().getDecorView();Button reminders=null;for(Button b:buttons(root))if(b.getText().toString().startsWith("Przypomnienia"))reminders=b;assertNotNull(reminders);reminders.performClick();});
+            assertTrue(reminder.getString("source_when").contains("T"));
+            assertEquals(ReminderTimes.beforeEvent(reminder.getString("source_when"),false,java.time.ZoneId.systemDefault(),System.currentTimeMillis()),reminder.getLong("due"));
+            scenario.onActivity(a->{NavigationTestSupport.open(a,"Przypomnienia");});
             click(NOTE);waitText("Twoje przypomnienie");click("Pokaż wpis");waitText("Ćwiczenia z ułamków");waitText("Pobierz treść zadania");click("Zamknij");
         }finally{cleanup();}
+    }
+    @Test public void dateOnlyHomeworkOffersPreviousEveningWithoutAnHourlyShortcut()throws Exception {
+        cleanup();
+        try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(new Intent(context(),MainActivity.class).putExtra("demo",true))) {
+            waitText("DEMO ·");
+            scenario.onActivity(a->{NavigationTestSupport.open(a,"Zadania domowe");});
+            scenario.onActivity(a->{View label=find(a.getWindow().getDecorView(),"Opis ulubionej książki",false);assertNotNull(label);((View)label.getParent()).performClick();});
+            click("Przypomnij mi…");waitText("Nowe przypomnienie");waitText("Dzień wcześniej o 18:00");
+            assertTrue(root().findAccessibilityNodeInfosByText("Godzinę wcześniej").isEmpty());
+            click("Dzień wcześniej o 18:00");enterNote(root());click("Zapisz");
+            JSONObject saved=null;long deadline=System.currentTimeMillis()+5000;
+            while(saved==null&&System.currentTimeMillis()<deadline) {
+                JSONArray rows=new ReminderStore(context()).list();
+                for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).optString("note").equals(NOTE))saved=rows.getJSONObject(i);
+                if(saved==null)Thread.sleep(30);
+            }
+            assertNotNull(saved);assertFalse(saved.getString("source_when").contains("T"));
+            assertEquals(ReminderTimes.beforeEvent(saved.getString("source_when"),true,java.time.ZoneId.systemDefault(),System.currentTimeMillis()),saved.getLong("due"));
+        } finally {cleanup();}
     }
     private java.util.List<Button> buttons(View root){java.util.List<Button> result=new java.util.ArrayList<>();if(root instanceof Button)result.add((Button)root);if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++)result.addAll(buttons(((ViewGroup)root).getChildAt(i)));return result;}
     @Test public void homeworkChangeNotificationContainsCountOnly()throws Exception{

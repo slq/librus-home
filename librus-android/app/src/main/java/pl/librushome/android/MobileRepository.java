@@ -31,6 +31,8 @@ public final class MobileRepository {
     private Listener listener;
     private volatile boolean busy;
     private volatile boolean initialized;
+    private volatile boolean focused;
+    public void focused(boolean value) { focused = value; }
     private JSONObject state = new JSONObject();
     private PyObject service;
     private volatile String storageError = "";
@@ -95,8 +97,10 @@ public final class MobileRepository {
     }
 
     public void open() {
+        if (!focused && BackgroundSync.nightPaused(context)) return;
         if (busy || (initialized && SyncPolicy.remaining(context) > 0)) return;
         submit(() -> {
+            if (!focused && BackgroundSync.nightPaused(context)) return;
             JSONObject before = new JSONObject(service.callAttr("state_json").toString());
             if (before.optString("mode").equals("demo") || (!before.optBoolean("connected") && !before.optBoolean("remembered"))) return;
             if (!SyncPolicy.begin(context)) return;
@@ -114,6 +118,7 @@ public final class MobileRepository {
     }
 
     public void connect(String login, String password, boolean remember) {
+        GoogleCalendarSync.demo(false);
         submit(() -> {
             if (!remember) {
                 BackgroundSync.enabled(context, false);
@@ -142,7 +147,8 @@ public final class MobileRepository {
     private void finishSync() throws Exception {
         JSONObject current = new JSONObject(service.callAttr("state_json").toString());
         boolean saved = persist();
-        if (saved && !current.optString("mode").equals("demo") && NotificationHub.dataEnabled(context)) {
+        if (saved && !current.optString("mode").equals("demo")) GoogleCalendarSync.syncStored(context);
+        if (saved && !focused && !current.optString("mode").equals("demo") && NotificationHub.dataEnabled(context)) {
             String outcome = NotificationHub.changes(context, current.optJSONObject("changes") == null ? new JSONObject() : current.getJSONObject("changes"));
             if (outcome.equals("blocked")) operationError = "Nowe dane zapisano, ale Android blokuje powiadomienia. Sprawdź ustawienia powiadomień.";
         }
@@ -156,8 +162,12 @@ public final class MobileRepository {
         if (!BackgroundSync.enabled(context)) {
             BackgroundSync.configure(context, false); main.post(completion); return;
         }
+        // Skip before Python startup, Keystore reads and login. Recheck after
+        // queueing so a job crossing 20:00 cannot begin fetching at night.
+        if (BackgroundSync.nightPaused(context)) { main.post(completion); return; }
         if (busy) { main.post(completion); return; }
         submit(() -> {
+            if (BackgroundSync.nightPaused(context)) return;
             JSONObject before = new JSONObject(service.callAttr("state_json").toString());
             if (!before.optBoolean("remembered") || before.optString("mode").equals("demo")) {
                 BackgroundSync.enabled(context, false); return;
@@ -165,14 +175,17 @@ public final class MobileRepository {
             if (!SyncPolicy.begin(context)) return;
             service.callAttr("open"); finishSync();
             JSONObject after = new JSONObject(service.callAttr("state_json").toString());
-            if (after.optBoolean("needs_login") && after.optDouble("retry_after") * 1000 <= System.currentTimeMillis()) {
+            // Expiry of an old session permits one recovery at the next scheduled attempt.
+            // Only a rejected login/fresh session disables background reads.
+            if (after.optBoolean("needs_login") && after.optBoolean("auto_login_blocked")
+                    && after.optDouble("retry_after") * 1000 <= System.currentTimeMillis()) {
                 BackgroundSync.enabled(context, false);
                 operationError = "Odczyt w tle zatrzymany: zaloguj się ponownie i włącz odświeżanie w Ustawieniach.";
             }
         }, completion);
     }
 
-    public void demo() { submit(() -> { BackgroundSync.enabled(context, false); service.callAttr("demo"); }); }
+    public void demo() { GoogleCalendarSync.demo(true); submit(() -> { BackgroundSync.enabled(context, false); service.callAttr("demo"); }); }
 
     public void readMessage(String itemId) {
         submit(() -> {
@@ -191,6 +204,7 @@ public final class MobileRepository {
     }
 
     public void forget() {
+        GoogleCalendarSync.disable(context);
         submit(() -> {
             BackgroundSync.enabled(context, false);
             service.callAttr("forget");

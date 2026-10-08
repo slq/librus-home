@@ -1,4 +1,4 @@
-# Zadania domowe — Android 0.3.2
+# Zadania domowe — Android 0.5.0
 
 ## Korzystanie z panelu
 

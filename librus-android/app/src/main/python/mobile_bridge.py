@@ -1,6 +1,8 @@
 """Android service: all calls are serialized by the Java repository worker.
 
-No disk, UI, telemetry, notifications or automatic password retry in this module.
+No disk, UI, telemetry or notifications in this module. Automatic connection
+uses opt-in saved credentials at most once per scheduled attempt; a rejected
+login or rejected newly authenticated session stops further automatic attempts.
 Java provides encrypted Android Keystore storage and lifecycle callbacks.
 """
 from __future__ import annotations
@@ -153,7 +155,7 @@ class MobileService:
         if not fetch:
             self.status = "Konto połączone. Kolejny odczyt danych po zakończeniu przerwy 5 minut."
             return self.state_json()
-        return self.refresh()
+        return self.refresh(after_login=True)
 
     def open(self):
         self.last_changes = {}
@@ -174,7 +176,7 @@ class MobileService:
             return result
         return self.state_json()
 
-    def refresh(self):
+    def refresh(self, *, after_login=False):
         self.last_changes = {}
         if self.mode == "demo":
             return self.state_json()
@@ -206,7 +208,10 @@ class MobileService:
                         self.blocked.add(kind)
                     else:
                         self.close_client()
-                        self.auto_login_blocked = True
+                        # An existing session may expire while credentials remain valid.
+                        # Retry only on the next scheduled attempt (Java enforces 5 min).
+                        # A failed fresh session stops recovery to avoid a login loop.
+                        self.auto_login_blocked = after_login or not bool(self.credentials)
                         break
             except Exception:
                 self.errors[kind] = "Nie rozpoznano danych sekcji. Zachowano poprzedni odczyt."
@@ -216,7 +221,9 @@ class MobileService:
         if self.retry_after > self.clock():
             self.status = "Librus ograniczył zapytania. Pobieranie wstrzymane na co najmniej godzinę."
         elif not self.client:
-            self.status = "Sesja wygasła. Połącz konto ponownie; zachowano dostępne dane."
+            self.status = ("Sesja wygasła. Zapamiętane konto zostanie połączone przy następnej próbie pobrania; pokazuję ostatnią kopię."
+                           if self.credentials and not self.auto_login_blocked else
+                           "Sesja wygasła. Połącz konto ponownie; zachowano dostępne dane.")
         elif successes == len(KINDS):
             self.status = "Dane aktualne. " + (f"Zmiany: {sum(changes.values())}." if sum(changes.values()) else "Brak nowych zmian.")
         elif successes:

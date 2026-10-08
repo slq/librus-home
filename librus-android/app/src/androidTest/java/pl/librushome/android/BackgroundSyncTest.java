@@ -22,6 +22,7 @@ public class BackgroundSyncTest {
     @Test public void migratesOldCadenceToOnePersistedFifteenMinuteJob() {
         Context c=context();assertNoSchoolAccount(c);JobScheduler jobs=c.getSystemService(JobScheduler.class);
         try {
+            BackgroundSync.intervalMinutes(c,15);
             BackgroundSync.enabled(c,false);
             JobInfo old=new JobInfo.Builder(BackgroundSync.JOB_ID,new ComponentName(c,SyncJobService.class))
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setPeriodic(TimeUnit.MINUTES.toMillis(30),TimeUnit.MINUTES.toMillis(5)).setPersisted(true).build();
@@ -37,6 +38,23 @@ public class BackgroundSyncTest {
             long matching=jobs.getAllPendingJobs().stream().filter(job->job.getId()==BackgroundSync.JOB_ID).count();
             assertEquals(1,matching);assertEquals(updated.getIntervalMillis(),jobs.getPendingJob(BackgroundSync.JOB_ID).getIntervalMillis());
         } finally {BackgroundSync.enabled(c,false);}
+    }
+    @Test public void selectedIntervalsUpdateTheSameJobAndDisabledSettingsNeverScheduleIt() {
+        Context c=context();assertNoSchoolAccount(c);JobScheduler jobs=c.getSystemService(JobScheduler.class);
+        int original=BackgroundSync.intervalMinutes(c);
+        try {
+            BackgroundSync.enabled(c,false);BackgroundSync.intervalMinutes(c,30);assertNull(jobs.getPendingJob(BackgroundSync.JOB_ID));
+            BackgroundSync.enabled(c,true);
+            for(int minutes:new int[]{30,60,15}) {
+                BackgroundSync.intervalMinutes(c,minutes);
+                assertEquals(minutes,BackgroundSync.intervalMinutes(c));
+                JobInfo job=jobs.getPendingJob(BackgroundSync.JOB_ID);assertNotNull(job);
+                assertEquals(TimeUnit.MINUTES.toMillis(minutes),job.getIntervalMillis());assertTrue(job.isPersisted());
+                assertEquals(1,jobs.getAllPendingJobs().stream().filter(value->value.getId()==BackgroundSync.JOB_ID).count());
+            }
+            try {BackgroundSync.intervalMinutes(c,5);fail("Invalid interval accepted");}catch(IllegalArgumentException expected){}
+            assertEquals(15,BackgroundSync.intervalMinutes(c));
+        } finally {BackgroundSync.enabled(c,false);BackgroundSync.intervalMinutes(c,original);}
     }
     @Test public void optingOutCancelsJobAndConfigurationDoesNotEnableItAgain() {
         Context c=context();assertNoSchoolAccount(c);JobScheduler jobs=c.getSystemService(JobScheduler.class);

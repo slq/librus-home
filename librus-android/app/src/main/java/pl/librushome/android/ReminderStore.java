@@ -27,7 +27,11 @@ public final class ReminderStore {
         return local.toInstant(offsets.get(0)).toEpochMilli();
     }
     public JSONObject save(String id, String kind, String source, String profile, boolean demo, String title,
-                           String note, long due, boolean showText, long now) throws Exception { synchronized (LOCK) {
+                           String note, long due, boolean showText, long now) throws Exception {
+        return save(id, kind, source, profile, demo, title, note, due, showText, now, "");
+    }
+    public JSONObject save(String id, String kind, String source, String profile, boolean demo, String title,
+                           String note, long due, boolean showText, long now, String sourceWhen) throws Exception { synchronized (LOCK) {
         note = note.trim();
         if (note.isEmpty() || note.codePointCount(0, note.length()) > 200) throw new IllegalArgumentException("Wpisz treść od 1 do 200 znaków.");
         if (due <= now) throw new IllegalArgumentException("Wybierz termin w przyszłości.");
@@ -41,6 +45,8 @@ public final class ReminderStore {
                 .put("kind", kind).put("source_id", source).put("profile", profile).put("demo", demo)
                 .put("title", title).put("note", note).put("due", due).put("show_text", showText)
                 .put("status", "pending").put("delivery", "");
+        if (sourceWhen.isEmpty() && found >= 0) sourceWhen = rows.getJSONObject(found).optString("source_when");
+        if (!sourceWhen.isEmpty()) item.put("source_when", sourceWhen);
         if (found < 0) rows.put(item); else rows.put(found, item);
         write(rows); // Failure leaves the previous file intact, and caller does not schedule.
         return item;
@@ -58,6 +64,19 @@ public final class ReminderStore {
                 item.put("status", "fired").put("fired_at", now).put("delivery", "attempting");
                 write(rows); // Persist the claim before posting: concurrent receivers cannot duplicate it.
                 return item;
+            }
+        }
+        return null;
+    } }
+    /** Only the exact fired notification may reschedule this reminder, once. */
+    public JSONObject snooze(String id, long firedAt, long previousDue, long now) throws Exception { synchronized (LOCK) {
+        JSONArray rows = list();
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject item = rows.getJSONObject(i);
+            if (item.optString("id").equals(id) && item.optString("status").equals("fired")
+                    && item.optLong("fired_at", -1) == firedAt && item.optLong("due", -1) == previousDue) {
+                item.put("due", Math.addExact(now, 30 * 60 * 1000L)).put("status", "pending").put("delivery", "");
+                item.remove("fired_at"); write(rows); return item;
             }
         }
         return null;

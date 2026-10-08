@@ -2,11 +2,11 @@
 
 Repozytorium aplikacji **LibrusApp** do konta LIBRUS Synergia: wersji desktopowej dla Windows oraz mobilnej dla Androida. Obie pokazują dane dziennika i przechowują zaszyfrowaną kopię na urządzeniu.
 
-Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Wersja desktopowa: **0.1.1**, Android: **0.3.2**. Status: prototypy rozwijane i sprawdzane lokalnie.
+Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Wersja desktopowa: **0.1.1**, Android: **0.7.0**. Status: prototypy rozwijane i sprawdzane lokalnie.
 
 ## Możliwości
 
-Repozytorium zawiera dwie aplikacje: [LibrusApp dla Windows](librus-app/README.md) i [LibrusApp dla Androida](librus-android/README.md). Wersja Android ma APK do instalacji przez USB, z logowaniem, odczytem danych po otwarciu, limitem 5 minut, lokalnymi przypomnieniami, zadaniami domowymi i opcjonalnymi powiadomieniami. Jej [zakres pierwszej wersji](librus-android/MVP_SCOPE.md) opisuje adaptację wymagań desktopu.
+Repozytorium zawiera dwie aplikacje: [LibrusApp dla Windows](librus-app/README.md) i [LibrusApp dla Androida](librus-android/README.md). Wersja Android ma APK do instalacji przez USB, z logowaniem, odczytem danych po otwarciu, limitem 5 minut, lokalnymi przypomnieniami, zadaniami domowymi i opcjonalnymi powiadomieniami. Od 0.7.0 ma ekran Start „Dzisiaj / Jutro” i dolne menu z pozostałymi panelami pod Więcej. Jej [zakres pierwszej wersji](librus-android/MVP_SCOPE.md) opisuje adaptację wymagań desktopu.
 
 - Oceny, wiadomości, ogłoszenia, frekwencja i plan lekcji.
 - Terminarz w widoku kalendarza z listą poniżej lub samej listy.

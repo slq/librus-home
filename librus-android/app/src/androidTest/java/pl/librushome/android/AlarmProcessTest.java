@@ -10,7 +10,7 @@ import org.json.JSONObject;
 public class AlarmProcessTest {
     @Test public void persistedAlarmSurvivesProcessExitAndOpensItsReminder() throws Exception {
         String phase=InstrumentationRegistry.getArguments().getString("alarm_phase","");
-        Assume.assumeTrue(phase.equals("seed")||phase.equals("verify"));
+        Assume.assumeTrue(phase.equals("seed")||phase.equals("verify")||phase.equals("verify-delivery"));
         assertTrue("Use a blank emulator, never a phone",Build.HARDWARE.equals("ranchu")||Build.HARDWARE.equals("goldfish"));
         Context target=InstrumentationRegistry.getInstrumentation().getTargetContext();
         android.content.SharedPreferences own=target.getSharedPreferences("alarm_process_fixture",Context.MODE_PRIVATE);
@@ -33,6 +33,7 @@ public class AlarmProcessTest {
         try {
             JSONObject delivered=store.get(id);assertNotNull(delivered);
             assertEquals("fired",delivered.getString("status"));assertEquals("sent",delivered.getString("delivery"));
+            if(phase.equals("verify-delivery"))return; // Verify while screen remains locked; no Activity is started.
             // Verify the persisted receiver result above, then recreate its same payload
             // to test the tap route even if the original notification was dismissed.
             assertEquals("sent",NotificationHub.reminder(target,delivered));

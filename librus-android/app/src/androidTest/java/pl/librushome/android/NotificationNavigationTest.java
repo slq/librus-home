@@ -63,8 +63,8 @@ public class NotificationNavigationTest {
         String id=item.getString("id");
         MainActivity activity=launchDemo();
         try {
-            waitForText("Nieprzeczytane wiadomości");
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{Button b=button(activity.getWindow().getDecorView(),"Przypomnienia");assertNotNull(b);b.performClick();});
+            waitForText("Dzisiaj");
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{NavigationTestSupport.open(activity,"Przypomnienia");});
             waitForText("SYNTHETIC_STALE_TAP_NOTE");waitForText("Zaplanowane");
             home();
             assertNotNull(store.claim(id,now+60000));store.delivered(id,now+60000,"sent");
@@ -77,12 +77,12 @@ public class NotificationNavigationTest {
     @Test public void tappingChangesReturnsToOverviewFromAnotherPanel() throws Exception {
         MainActivity activity=launchDemo();
         try {
-            waitForText("Nieprzeczytane wiadomości");
-            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{Button b=button(activity.getWindow().getDecorView(),"Ustawienia");assertNotNull(b);b.performClick();});
-            waitForText("Powiadomienia i alarmy");
+            waitForText("Dzisiaj");
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{NavigationTestSupport.open(activity,"Ustawienia");});
+            waitForText("Konto i dane");
             assertEquals("sent",NotificationHub.changes(context(),new JSONObject().put("grades",1)));
             notification("changes").contentIntent.send();
-            waitForText("Nieprzeczytane wiadomości");
+            waitForText("Dzisiaj");
         } finally {finishActivities();NotificationHub.manager(context()).cancel("changes",1);}
     }
 }
