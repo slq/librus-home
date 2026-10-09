@@ -7,7 +7,7 @@ import static org.junit.Assert.*;
 /** Drives real bottom controls and the More dialog, including secondary panels. Call on the UI thread. */
 final class NavigationTestSupport {
     static Button button(View root,String label) {
-        if(root instanceof Button && (((Button)root).getText().toString().equals(label)
+        if(root instanceof Button && !(root instanceof CompoundButton) && (((Button)root).getText().toString().equals(label)
                 || (label.equals("Przypomnienia")&&((Button)root).getText().toString().startsWith("Przypomnienia ·"))))return (Button)root;
         if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++) {
             Button result=button(((ViewGroup)root).getChildAt(i),label);if(result!=null)return result;
@@ -15,7 +15,7 @@ final class NavigationTestSupport {
         return null;
     }
     static void open(MainActivity activity,String panel) {
-        String label=panel.equals("Przegląd")?"Start":panel.equals("Zadania domowe")?"Zadania":panel;
+        String label=panel.equals("Przegląd")?"Start":panel;
         Button control=button(activity.getWindow().getDecorView(),label);
         if(control==null) {
             Button more=button(activity.getWindow().getDecorView(),"Więcej");assertNotNull(more);assertTrue(more.performClick());

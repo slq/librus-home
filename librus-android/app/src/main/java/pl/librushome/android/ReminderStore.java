@@ -95,5 +95,6 @@ public final class ReminderStore {
         for (int i = 0; i < before.length(); i++) if (!before.getJSONObject(i).optString("id").equals(id)) after.put(before.getJSONObject(i));
         write(after);
     } }
+    void replace(JSONArray rows) throws Exception { synchronized (LOCK) { write(rows); } }
     public void clear() throws Exception { synchronized (LOCK) { secure.clear(); } }
 }

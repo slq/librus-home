@@ -1,8 +1,88 @@
-# Weryfikacja LibrusApp Android 0.7.0
+# Weryfikacja LibrusApp Android 0.12.0
 
 Weryfikacja lokalna: 8 października 2026. Telefon docelowy: Samsung Galaxy S10, Android 12, One UI 4.1. Nową wersję sprawdzono na emulatorze Androida 12, API 31, Google APIs, x86_64; fizyczny S10 nie był podłączony.
 
-## Wyniki
+## Aktualizator APK — 0.12.0
+
+Weryfikacja 8 października 2026: produkcyjne APK 0.12.0 zbudowane i podpisane dotychczasowym certyfikatem (SHA-256 `0b022decbecb6f36fa5279f98d4451165f3ade0b3dca2d50019e5039a10217fe`), debuggable wyłączone. Java **25**, natywne Android API 31 **29** różnych scenariuszy — **54 zaliczone testy**. Lint debug: **0 błędów, 23 ostrzeżenia** (nowe ostrzeżenie dotyczy nieprzeniesionego do resources tekstu). Wspólne źródła i licencje zgodne; warstwa Python nie zmieniała się. Fizycznego S10 nie testowano.
+
+- `UpdatePolicyTest`: trzy nowe scenariusze stałego repozytorium i nazw pliku, HTTPS/hostów przekierowań, odrzucenia userinfo/innych portów/dowolnego serwera oraz dziennego limitu i cofnięcia zegara.
+- `UpdateValidationTest`: trzy scenariusze w podstawowym zestawie — ścisłe metadane, niepoprawne typy/pakiet/hash/rozmiar/URL/opis; rzeczywiste APK release o zgodnym podpisie, odrzucenie niepodpisanego, zmienionego i o niewłaściwej wersji; częściowy/błędny plik nie jest gotowy do instalacji ani nie zmienia zapisu szkolnego. Osobny czwarty scenariusz potwierdza trwały JobScheduler 1703 co dobę, zatrzymanie po wyłączeniu, ograniczenie automatycznych sprawdzeń i brak automatycznego pobierania APK.
+- `UpdateUiTest`: ręczne sprawdzenie, opis zmian i rozmiar, pobranie na żądanie, weryfikacja oraz zachowanie przycisku instalacji po odtworzeniu Activity.
+- Regresje Startu, wspólnego wyszukiwania, historii zmian, powiadomień, przypomnień i statusów zadań: 26 scenariuszy w podstawowym zestawie, wszystkie poprawne, w tym cztery nowe scenariusze walidacji/interfejsu aktualizatora.
+
+`UpdateInstallIntegrationTest` wykonano w dwóch etapach. Seed na pustym emulatorze zapisuje fikcyjne zaszyfrowane archiwum bez hasła, własne przypomnienie i wykonane zadanie. Aktualizator pobiera lokalnie symulowane wydanie 0.12.1 / code 19, weryfikuje je i otwiera rzeczywiste okno Androida „Do you want to update this app?”. Po potwierdzeniu Update przez ADB Android PackageInstaller zaktualizował aplikację z debug 0.12.0 / code 18 do release 0.12.1 / code 19. Verify w nowym procesie potwierdza brak debuggable oraz zachowanie archiwum, przypomnienia, statusu zadania i dostępu do Android Keystore. Po próbie usuwa tylko własne fikcyjne dane. Testowa 0.12.1 nie jest publikowana.
+
+Wszystkie testy natywne wykonano na pustym `LibrusBackgroundTest` bez konta szkolnego. Pierwsza publikacja jest osobnym krokiem: testy pobierania i aktualizacji użyły fikcyjnych metadanych oraz podpisanego APK testowego, nie udają istniejącego wydania na GitHub. Publiczne repozytorium slq/librus-home nie miało jeszcze wydań podczas przygotowania. [Historie, instalacja rodzinna, podpis i publikowanie](UPDATES.md).
+
+## Archiwum ogłoszeń — 0.11.0
+
+Weryfikacja 8 października 2026: APK 0.11.0 zbudowany, Python **42**, Java **22** i Android API 31 **22** odrębne scenariusze — **86 zaliczonych testów**. Lint: **0 błędów, 22 ostrzeżenia**; wspólne źródła i licencje zgodne. Fizyczny S10 nie był podłączony.
+
+Siedem nowych scenariuszy Python obejmuje: zachowanie wszystkich wpisów po częściowej i pustej liście bez fałszywych powiadomień; podmianę treści przy tym samym ID i ponowne pojawienie się bez duplikatów; pustą pierwszą bazę i późniejsze nowe ogłoszenia; migrację starszej kopii mimo zmiany roku bez przywracania starych ocen; przełączenie/ponowny wybór konta, demo, nieudane logowanie i usunięcie danych; niepoprawny odczyt i atomowe odrzucenie uszkodzonego archiwum; ponad 300 wpisów i opisy ponad 4000 znaków bez usuwania lub przycinania, z ochroną przed mutacją modelu widoku. Pozostałe 35 testów mostu i historii zmian również zaliczone.
+
+`AnnouncementArchiveRestartTest` wykonano dwukrotnie z rzeczywistym `adb am force-stop` między Seed i Verify. Seed tworzy dwa fikcyjne ogłoszenia, zmienia treść pierwszego, potem symuluje pustą listę serwera i zapis starszego roku 2000/2001. Zapis nie zawiera hasła; sprawdzono brak jawnej treści w pliku AES. Verify w nowym procesie odtwarza oba ogłoszenia offline w bieżącym roku, sprawdza oznaczenie archiwum, oryginalne szczegóły, odtworzenie Activity i wyniki wspólnej wyszukiwarki: najnowsza treść daje 1 wynik, poprzednia 0. Po próbie usuwa tylko swoją fikcyjną kopię.
+
+19 natywnych regresji (`HomeScreenTest`, `ChangesFeedUiTest`, `GlobalSearchUiTest`, `SearchDataTest`, `NotificationNavigationTest`, `HomeworkCompletionTest`) i osobny `BackgroundNotificationTest` przeszły. Wszystkie próby natywne odbyły się wyłącznie na pustym `LibrusBackgroundTest`. Główny emulator otrzymuje tylko główny APK bez fikcyjnych danych i instrumentacji.
+
+Archiwum przechowuje pełną najnowszą wersję pod danym ID. Testy stabilnego ID nie znoszą ograniczenia obecnego adaptera HTML: tożsamość powstaje z tytułu/autora/daty, zatem zmiana tych pól może dać osobną pozycję. Wspólny adapter desktopu nie był zmieniany. [Historie, migracja i ograniczenia](ANNOUNCEMENTS.md).
+
+Próba dwufazowa (tylko pusty emulator):
+
+```powershell
+adb -s emulator-5556 shell am instrument -w -e class 'pl.librushome.android.AnnouncementArchiveRestartTest#seed' pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 shell am force-stop pl.librushome.android
+adb -s emulator-5556 shell am instrument -w -e class 'pl.librushome.android.AnnouncementArchiveRestartTest#verify' pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+## Dolne menu — 0.10.1
+
+Weryfikacja 8 października 2026: APK 0.10.1 zbudowany, Java **22** testy i Android API 31 **20** odrębnych scenariuszy — **42 zaliczone testy**. Lint: **0 błędów, 22 ostrzeżenia**; wspólne źródła i licencje zgodne. Warstwa Python i mechanizmy tła nie zmieniały się i nie wymagały ponownego uruchomienia wcześniejszych zestawów.
+
+Sprawdzono kolejność Start, Kalendarz, Ogłoszenia, Wiadomości, Więcej oraz wyróżnienie Ogłoszeń i Więcej po wejściu do Zadań. Zadania domowe i Terminarz są dostępne przez More; kalendarz, szczegóły, checkboxy wykonania, wejścia z powiadomień i wspólne wyszukiwanie pozostają dostępne. Uruchomiono `HomeScreenTest`, `CalendarTest`, `HomeworkTest`, `HomeworkCompletionTest`, `NotificationNavigationTest`, `GlobalSearchUiTest`.
+
+Pierwszy przebieg zaliczył 19 scenariuszy; pomocnik nawigacji w jednym teście kalendarza wybrał checkbox „Zadania domowe” zamiast przycisku menu. Po wykluczeniu `CompoundButton` z dopasowania przycisków poprawiony scenariusz zaliczono osobno. Usunięto nieużywaną ikonę dawnej zakładki Zadania. Układ i ikonę megafonu sprawdzono wizualnie na syntetycznym demo 320×640. Próby odbyły się tylko na pustym emulatorze, bez konta szkolnego; fizycznego S10 nie testowano. Główny emulator otrzymuje wyłącznie główny APK.
+
+## Wspólne wyszukiwanie — 0.10.0
+
+Weryfikacja 8 października 2026: APK 0.10.0 zbudowany. W tym zakresie uruchomiono Python **35**, Java **22** i Android API 31 **19** odrębnych scenariuszy — **76 zaliczonych testów**. Lint: **0 błędów, 22 ostrzeżenia**. Wspólne źródła i licencje zgodne z desktopem. Fizyczny S10 nie był podłączony.
+
+- `SearchTextTest`: cztery nowe testy polskich znaków, wielkości liter i znaków łączących, wymagania wszystkich słów niezależnie od ich kolejności i białych znaków, literalnej interpunkcji oraz pustego zapytania.
+- `SearchDataTest`: dwie nowe próby na rzeczywistym JSON Androida — siedem sekcji, podtytuły/opisy/daty w obu formatach, filtrowanie źródła, identyczne ID z różnych źródeł, pomijanie nieznanych metadanych i nienaruszanie danych; kolejność wyników, wszystkie tryby sortowania oraz historia przypomnień z izolacją profilu/demo.
+- `GlobalSearchUiTest`: trzy nowe próby — wejście ze Startu i Więcej, wyszukiwanie bez ogonków, oryginalne szczegóły zadania bez pobierania treści, query/source po odtworzeniu Activity i niezależność od wyszukiwania w pojedynczej sekcji; 65 dawnych wpisów, rozwijanie kolejnych 50, aktualizacja do 66 bez utraty tekstu, brak wyników; własne przypomnienie i oryginalne szczegóły, bez ujawniania innego profilu.
+- Regresje: `HomeScreenTest`, `ChangesFeedUiTest`, `CalendarTest`, `HomeworkCompletionTest` — 14 dotychczasowych scenariuszy. Pierwszy przebieg miał 18 zaliczeń i jedno oczekiwanie starego numeru wersji w teście nawigacji. Po aktualizacji oczekiwania do 0.10.0 ten scenariusz zaliczono osobno; łącznie 19 różnych scenariuszy natywnych przeszło. Nie powtarzano pozostałych testów tła i restartu, których kod ta zmiana nie dotyczy.
+
+Wszystkie próby natywne odbyły się na pustym `LibrusBackgroundTest` z danymi fikcyjnymi. Wygląd wyników zweryfikowano na zrzucie demo 320×640: pole, źródło, kolejność i licznik są czytelne, pierwszy wynik wskazuje Terminarz, dolne menu pozostaje widoczne. Główny emulator otrzymuje tylko główny APK, bez testowej instrumentacji i fikcyjnych danych.
+
+Historie oraz zakres lokalnych danych: [SEARCH.md](SEARCH.md).
+
+## Zmiany od ostatniego wejścia — 0.9.0
+
+Weryfikacja 8 października 2026: APK 0.9.0 zbudowany; Python **35** testów, Java **18** testów, Android API 31 **38** testów — **łącznie 91 poprawnych wyników**. Lint: **0 błędów, 22 ostrzeżenia**. Wspólne źródła i licencje zgodne z desktopem. Fizycznego S10 nie testowano w tej wersji.
+
+Dziewięć nowych scenariuszy Python obejmuje: ciche pierwsze pobranie, siedem źródeł zmian zbieranych w tle, brak utraty przy powtórnym odczycie i odtworzenie zapisu, aktualizacje podczas wizyty, połączenie zmian tego samego ID bez mutacji modelu widoku, rozróżnienie nowych/zmienionych/usuniętych/przywróconych wpisów, częściowe błędy i pierwszy udany odczyt po błędzie, granice przesuwanego zakresu dat, brak zdarzeń od samego odczytu treści lub zmiany unread, brak trwałej pełnej treści, migrację starszego zapisu, konta/demo/rok i usunięcie danych, atomowe odrzucenie uszkodzonej struktury oraz jawny limit 300 wpisów i 4000 znaków kopii opisu. Dodatkowy scenariusz sprawdza ponowne logowanie po usunięciu danych bez wychodzenia z aplikacji: zmiany nadal aktualizują widoczny Start.
+
+`ChangesFeedUiTest`: dwa scenariusze — demo siedmiu źródeł, wybór Terminarza i szczegóły wydarzenia bez szukania w panelu, zachowanie filtra oraz dokładnie tego samego znacznika wizyty po odtworzeniu Activity; także wejście do zachowanej kopii usuniętego wydarzenia spoza planu dnia bez modyfikacji oryginału.
+
+`ChangesVisitIntegrationTest` wykonano w dwóch osobnych procesach instrumentacji z rzeczywistym force-stop między Seed/Verify. Seed tworzy fikcyjną kopię z siedmioma zmianami po ponownych odczytach, bez zapamiętanego hasła. Verify odtwarza zaszyfrowaną kopię w rzeczywistym repozytorium Androida, pokazuje wszystkie źródła, potwierdza brak rozpoczęcia nowej wizyty przy zmianie konfiguracji oraz symuluje pobranie kolejnego wpisu przy zatrzymanym Activity. Powrót pokazuje tylko nowy okres i resetuje filtr do wszystkich źródeł. Nie wykonywano prawdziwego logowania; po próbie usunięto tylko tę fikcyjną kopię.
+
+31 podstawowych scenariuszy natywnych przeszło; osobno zaliczono po dwa etapy odtworzenia zadań i zmian oraz trzy testy powiadomień w tle, przerwy nocnej i eksportu Calendar Provider. Poprawiono wyłącznie pomocniczy dostęp do słownika Python oraz przekazywanie jawnego kontekstu do exec w teście mostu; końcowy Seed/Verify zaliczony. Wygląd listy sprawdzono na syntetycznym demo 320×640. Widoczny emulator otrzymuje wyłącznie główny APK, bez testowych danych.
+
+Historie, definicja wejścia, limit i aktualizacja ze starszych wersji: [HOME_SCREEN.md](HOME_SCREEN.md#us-home-04--co-zmieniło-się-od-ostatniego-wejścia).
+
+## Oznaczanie zadań jako zrobione — 0.8.0
+
+Weryfikacja 8 października 2026: APK 0.8.0 zbudowany; Python **26** testów, Java **18** testów, Android API 31 **34** testy — **łącznie 78 poprawnych wyników**. Lint: **0 błędów, 22 ostrzeżenia**. Wspólne źródła i licencje pozostają zgodne z desktopem. Fizyczny S10 nie był testowany dla tej wersji.
+
+Nowy `HomeworkCompletionTest` obejmuje sześć scenariuszy: szyfrowany trwały zapis i cofnięcie, izolację konta/demo/roku/ID, zachowanie statusu przy zmianie tematu lub terminu, brak ponownego zapisu przy tej samej wartości, odmowę nadpisania nieodczytywalnej struktury, odrzucenie brakującej tożsamości zadania, usunięcie wraz z odrzuceniem wcześniej zakolejkowanej zmiany, checkbox i filtry, zachowanie filtra po odtworzeniu Activity, cofnięcie ze szczegółów, wykonane zadanie usunięte ze Startu i nadal dostępne w kalendarzu, oraz rzeczywiste usuwanie przez Ustawienia z powrotem do czystego demo. Izolowane testy pliku mają osobne aliasy i nazwy. W teście potwierdzenia usuwania dopasowanie uwzględnia systemowe wielkie litery na przycisku; skorygowany scenariusz zaliczony osobno po pozostałych testach.
+
+Dwufazowy `HomeworkCompletionRestartTest`: Seed zapisuje fikcyjne wykonanie, potem rzeczywiste `adb am force-stop` kończy proces. Verify w nowym procesie odtwarza status, uruchamia demo, potwierdza ukrycie zadania w Do zrobienia i obecność zaznaczonego checkboxa w Zrobione, a następnie usuwa tylko to syntetyczne oznaczenie. Statusy nie wymagają sesji ani dostępu do szkoły. Test warstwy Python potwierdza udostępnienie roku kopii jako kontekstu lokalnego statusu.
+
+Pozostałe testy UI, powiadomień, odczytu w tle, przerwy nocnej i eksportu Calendar Provider przeszły. Podstawowy zestaw ma 29 scenariuszy (28 zaliczonych w zestawie i osobno zaliczony poprawiony scenariusz usuwania); osobno uruchomiono trzy testy tła/kalendarza oraz dwa etapy restartu. Wizualnie sprawdzono wykonaną pozycję z przekreślonym tytułem i checkboxem na ekranie 320×640. Wszystkie próby wykonano na pustym `LibrusBackgroundTest` z fikcyjnymi danymi, bez konta szkolnego lub przesyłania danych do Google.
+
+Szczegóły i historie użytkownika: [HOMEWORK.md](HOMEWORK.md). Status jest własnym oznaczeniem na telefonie; nie zmienia szkolnego wpisu, wydarzenia Google ani alarmów przypomnień.
+
+## Historia wcześniejszych weryfikacji
 
 | Próba | Wynik |
 |---|---|
@@ -91,7 +171,7 @@ Używaj pustego emulatora, bez konta szkolnego. Testy Keystore mają osobne plik
 ```powershell
 adb -s emulator-5556 install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s emulator-5556 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.HomeScreenTest,pl.librushome.android.NativeSmokeTest,pl.librushome.android.NotificationAndReminderTest,pl.librushome.android.NotificationNavigationTest,pl.librushome.android.HomeworkTest,pl.librushome.android.BackgroundSyncTest,pl.librushome.android.ReminderConvenienceTest,pl.librushome.android.BackgroundOptionsUiTest,pl.librushome.android.CalendarTest pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.ChangesFeedUiTest,pl.librushome.android.HomeworkCompletionTest,pl.librushome.android.HomeScreenTest,pl.librushome.android.NativeSmokeTest,pl.librushome.android.NotificationAndReminderTest,pl.librushome.android.NotificationNavigationTest,pl.librushome.android.HomeworkTest,pl.librushome.android.BackgroundSyncTest,pl.librushome.android.ReminderConvenienceTest,pl.librushome.android.BackgroundOptionsUiTest,pl.librushome.android.CalendarTest pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
 `BackgroundNotificationTest` uruchamiaj oddzielnie, jako pierwszy test w nowym procesie instrumentacji na pustym emulatorze. Wprowadza tylko fikcyjny profil do kopii testowej, zastępuje konektor syntetycznymi odpowiedziami i przywraca poprzedni zapis. Nigdy nie uruchamiaj go na koncie szkolnym. Nie wykonuje rzeczywistych żądań sieciowych:
@@ -190,3 +270,53 @@ Próba potwierdza uruchomienie usługi w tle i bezpieczną obsługę braku konta
 Nie wprowadzano nowego loginu ani hasła. Listę zadań odczytano przez normalną synchronizację na emulatorze z już zapamiętanym kontem. Automatyczne testy regresji biblioteki i adaptera używają syntetycznych odpowiedzi HTML; rzeczywistej pełnej treści i załączników nie sprawdzano. Nie testowano fizycznego ARM64, restartu fizycznego telefonu, długiego Doze ani mechanizmów oszczędzania baterii One UI. APK zawiera arm64-v8a i x86_64. Zgoda na powiadomienia Androida 13+ ma obsługę w kodzie i kontrolę Lint, ale test urządzenia wykonano na Androidzie 12.
 
 Interwał JobScheduler zależy od Androida. Dokładne alarmy, systemowe wyciszenie, brak zgody i wymuszone zatrzymanie mają ograniczenia opisane w NOTIFICATIONS.md. Instalację i zachowanie One UI użytkownik sprawdza na swoim S10.
+
+### Powtórzenie odtworzenia statusu po zakończeniu procesu
+
+Tylko na pustym emulatorze bez konta szkolnego, po instalacji obu APK:
+
+```powershell
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.HomeworkCompletionRestartTest#seed pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 shell am force-stop pl.librushome.android
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.HomeworkCompletionRestartTest#verify pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+### Zmiany z poprzedniej wizyty po zakończeniu procesu
+
+Wyłącznie pusty emulator bez konta szkolnego; zainstaluj główny i testowy APK:
+
+```powershell
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.ChangesVisitIntegrationTest#seed pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 shell am force-stop pl.librushome.android
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.ChangesVisitIntegrationTest#verify pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+
+## Kopia JSON — Android 0.12.1
+
+8 października 2026: 49 testów Python (w tym 7 nowych dla przenośnej kopii), 25 testów Java i 25 prób natywnych przeszło poprawnie. Kompilacja oraz Lint bez błędów. Dane wyłącznie syntetyczne, osobny pusty emulator LibrusBackgroundTest/API 31 na porcie 5556; nie odczytywano konta użytkownika.
+
+- BackupDataTest (5): kompletne odtworzenie, pominięcie hasła, odrzucenie błędnych plików, brak powtórnych alertów, wycofanie błędu zapisu i odzyskanie dziennika przerwanego importu.
+- BackupUiTest (1): prawdziwe przyciski Ustawień, intencje systemowego wyboru pliku, eksport JSON, podgląd, anulowanie bez zmiany danych i potwierdzony import. Odpowiedzi wyboru pliku przechwytuje Instrumentation; nie testowano konkretnego dostawcy chmurowego.
+- BackupRepositoryTest (1): import usuwa sesję i wstrzymuje odczyty; po udanym fikcyjnym logowaniu z zapamiętaniem konto jest od razu utrwalone, a harmonogram 60 minut przywrócony. Test odkrył wcześniejszy błąd PyObject.get odczytujący atrybut zamiast pola słownika; odczyt wyniku logowania korzysta teraz z state_json.
+- BackupMigrationTest (3 fazy): eksport syntetycznej kopii, zachowanie pliku na komputerze, prawdziwe odinstalowanie aplikacji, ponowna instalacja, potwierdzenie braku starego klucza Android Keystore, zwrot pliku i import. Archiwum, przypomnienie, status zadania i opcje odtworzone; dane logowania nie są przenoszone.
+- Regresja HomeScreenTest, HomeworkCompletionTest i NotificationAndReminderTest (15).
+
+Ta próba nie zmienia klucza podpisującego APK: testuje przenośność JSON i utratę starego klucza szyfrującego dane na telefonie. Migracja na docelowy podpis produkcyjny, fizyczny S10, dostawcy plików w chmurze oraz kalendarz Google po reinstalacji nie były testowane.
+
+Kolejność próby reinstalacji (tylko pusty LibrusBackgroundTest):
+
+```powershell
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.BackupMigrationTest#seed pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 pull /sdcard/Android/data/pl.librushome.android/files/backup-migration.json .tools/backup-migration.json
+adb -s emulator-5556 uninstall pl.librushome.android
+adb -s emulator-5556 install app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5556 install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.BackupMigrationTest#prepare pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 push .tools/backup-migration.json /sdcard/Android/data/pl.librushome.android/files/backup-migration.json
+adb -s emulator-5556 shell am instrument -w -e class pl.librushome.android.BackupMigrationTest#verify pl.librushome.android.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Każda faza wymaga `OK`, sam kod wyjścia ADB nie oznacza poprawnego testu. Faza Prepare tworzy katalog nowej instalacji przez API aplikacji, ponieważ scoped storage blokuje ręczne tworzenie tego katalogu przez shell.
+
+Końcowe APK release 0.12.1/code 19 zainstalowano na pustym emulatorze i powtórzono BackupRepositoryTest oraz BackupDataTest/BackupUiTest: 7 prób zakończonych OK. Podpis zgodny z 0.12.0 (SHA-256 certyfikatu `0b022decbecb6f36fa5279f98d4451165f3ade0b3dca2d50019e5039a10217fe`), debuggable wyłączone. Archiwum odpowiadających źródeł obejmuje 134 pliki; nie zawiera kluczy, lokalnych konfiguracji, kopii JSON ani plików konta. Wydanie 0.12.1 jest przygotowane lokalnie; w tej próbie nie zostało opublikowane na GitHub.

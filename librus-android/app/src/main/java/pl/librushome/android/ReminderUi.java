@@ -40,6 +40,7 @@ public final class ReminderUi {
     private String status(JSONObject row) {
         if (row.optString("status").equals("pending")) return row.optLong("due") < System.currentTimeMillis() ? "Zaległe — oczekuje na alarm Androida" : "Zaplanowane";
         return switch(row.optString("delivery")) {
+            case "import_expired" -> "Termin minął przed importem — bez ponownego powiadomienia";
             case "sent" -> "Przekazane do Androida";
             case "blocked" -> "Wykonane — powiadomienia zablokowane";
             case "failed" -> "Wykonane — błąd wysyłki";
@@ -92,7 +93,7 @@ public final class ReminderUi {
         body.addView(text(row.optString("note"),19,0xff183047));body.addView(text(date(row.optLong("due")),15,ButtonStyles.TEAL));
         body.addView(text(status(row),14,0xff64748b));body.addView(text(section(row.optString("kind"))+" · "+row.optString("title"),14,0xff64748b));
         body.addView(text(row.optBoolean("show_text")?"Treść widoczna w powiadomieniu. Widocznością na ekranie blokady steruje Android.":"Treść ukryta w powiadomieniu systemowym.",13,0xff64748b));
-        if(row.has("fired_at"))body.addView(text("Uruchomiono: "+date(row.optLong("fired_at")),13,0xff64748b));
+        if(row.has("fired_at"))body.addView(text((row.optString("delivery").equals("import_expired")?"Zaimportowano po terminie: ":"Uruchomiono: ")+date(row.optLong("fired_at")),13,0xff64748b));
         if(!belongs(row))body.addView(text("Przypomnienie pochodzi z innego konta lub trybu demo. Połącz właściwe konto, aby otworzyć źródło.",14,0xff994835));
         ScrollView scroller=new ScrollView(activity);scroller.addView(body);
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("Twoje przypomnienie").setView(scroller).setPositiveButton("Zamknij",null).create();

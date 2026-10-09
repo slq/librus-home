@@ -63,7 +63,7 @@ public class NotificationNavigationTest {
         String id=item.getString("id");
         MainActivity activity=launchDemo();
         try {
-            waitForText("Dzisiaj");
+            waitForText("Przegląd");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{NavigationTestSupport.open(activity,"Przypomnienia");});
             waitForText("SYNTHETIC_STALE_TAP_NOTE");waitForText("Zaplanowane");
             home();
@@ -77,12 +77,12 @@ public class NotificationNavigationTest {
     @Test public void tappingChangesReturnsToOverviewFromAnotherPanel() throws Exception {
         MainActivity activity=launchDemo();
         try {
-            waitForText("Dzisiaj");
+            waitForText("Przegląd");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{NavigationTestSupport.open(activity,"Ustawienia");});
             waitForText("Konto i dane");
             assertEquals("sent",NotificationHub.changes(context(),new JSONObject().put("grades",1)));
             notification("changes").contentIntent.send();
-            waitForText("Dzisiaj");
+            waitForText("Przegląd");
         } finally {finishActivities();NotificationHub.manager(context()).cancel("changes",1);}
     }
 }

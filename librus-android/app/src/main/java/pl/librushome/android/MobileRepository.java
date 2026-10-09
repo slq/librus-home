@@ -38,6 +38,7 @@ public final class MobileRepository {
     private volatile String storageError = "";
     private volatile String operationError = "";
     private boolean writeEnabled = true;
+    private boolean visitForeground;
 
     private MobileRepository(Context context) {
         this.context = context;
@@ -54,7 +55,7 @@ public final class MobileRepository {
         if (!Python.isStarted()) Python.start(new AndroidPlatform(context));
         service = Python.getInstance().getModule("mobile_bridge").callAttr("get_service");
         service.callAttr("set_progress", this);
-        try { service.callAttr("restore_json", store.read()); }
+        try { BackupStore.recover(context); service.callAttr("restore_json", store.read()); }
         catch (Exception error) {
             storageError = "Nie można odczytać lokalnego zapisu. Zachowano plik. Usuń lokalne dane lub połącz konto ponownie.";
             writeEnabled = false;
@@ -94,6 +95,20 @@ public final class MobileRepository {
         if (json.isEmpty()) return false; // Demo must never replace a real account.
         try { store.write(json); storageError = ""; return true; }
         catch (Exception error) { storageError = "Nie zapisano danych. Bieżący widok pozostaje dostępny; po zamknięciu zmiany mogą zniknąć."; return false; }
+    }
+
+    /** Main-thread visit boundary; serialized after any in-flight background read. No school request. */
+    public boolean enterApp() {
+        if(visitForeground)return false;visitForeground=true;
+        worker.execute(()->{
+            try {initialize();service.callAttr("begin_visit");persist();update(service.callAttr("state_json").toString());}
+            catch(Exception error){operationError="Nie udało się odtworzyć listy zmian. Zachowano lokalny zapis.";main.post(this::dispatch);}
+        });
+        return true;
+    }
+    public void leaveApp(boolean changingConfiguration) {
+        if(changingConfiguration||!visitForeground)return;visitForeground=false;
+        worker.execute(()->{if(service!=null)service.callAttr("end_visit");});
     }
 
     public void open() {
@@ -139,8 +154,10 @@ public final class MobileRepository {
             boolean mayFetch = SyncPolicy.begin(context);
             service.callAttr("connect", login, password, remember, mayFetch);
             // An explicit successful login permits replacing an unreadable old state.
-            if (service.callAttr("state").get("connected").toBoolean()) writeEnabled = true;
+            if (new JSONObject(service.callAttr("state_json").toString()).optBoolean("connected")) writeEnabled = true;
             finishSync();
+            JSONObject current = new JSONObject(service.callAttr("state_json").toString());
+            if(current.optBoolean("connected") && current.optBoolean("remembered") && context.getSharedPreferences("notification_options",0).getBoolean("resume_background_after_login",false)) BackgroundSync.enabled(context,true);
         });
     }
 
@@ -203,12 +220,52 @@ public final class MobileRepository {
         });
     }
 
+    public interface BackupCallback { void complete(BackupDocument document, String error); }
+    private synchronized boolean beginBackup(BackupCallback callback) {
+        if(busy){main.post(()->callback.complete(null,"Poczekaj na zakończenie bieżącej operacji."));return false;}
+        busy=true;operationError="";dispatch();return true;
+    }
+    private void finishBackup(BackupCallback callback,BackupDocument result,String error) {
+        if(service!=null)try{update(service.callAttr("state_json").toString());}catch(Exception ignored){}
+        main.post(()->{busy=false;dispatch();callback.complete(result,error);});
+    }
+    public void exportBackup(android.net.Uri uri,BackupCallback callback) {
+        if(!beginBackup(callback))return;
+        worker.execute(()->{String error="";BackupDocument doc=null;
+            try{initialize();if(!storageError.isEmpty())throw new IllegalStateException("Storage unavailable");doc=BackupStore.capture(context,service.callAttr("portable_json").toString());byte[] bytes=doc.bytes();
+                try(java.io.OutputStream out=context.getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new java.io.IOException("No output");out.write(bytes);out.flush();}}
+            catch(Exception failure){doc=null;error="Nie zapisano pełnej kopii. Sprawdź miejsce i dostęp do pliku. Nie używaj nieukończonego pliku. W trybie demo przejdź najpierw do konta.";}
+            finishBackup(callback,doc,error);
+        });
+    }
+    public void previewBackup(android.net.Uri uri,BackupCallback callback) {
+        if(!beginBackup(callback))return;
+        worker.execute(()->{String error="";BackupDocument doc=null;
+            try{initialize();try(java.io.InputStream in=context.getContentResolver().openInputStream(uri)){doc=BackupDocument.read(in);}
+                String canonical=service.callAttr("validate_portable_json",doc.school()).toString();
+                // The normal reader must accept the entire candidate before any disk mutation.
+                Python.getInstance().getModule("mobile_bridge").get("MobileService").call().callAttr("restore_json",canonical);
+                doc.root.put("school",new JSONObject(canonical));}
+            catch(Exception failure){doc=null;error="Nie można odczytać kopii. Wybierz kompletny plik JSON LibrusApp (format 1, do 32 MB). Dane na telefonie pozostają bez zmian.";}
+            finishBackup(callback,doc,error);
+        });
+    }
+    public void importBackup(BackupDocument doc,BackupCallback callback) {
+        if(!beginBackup(callback))return;
+        worker.execute(()->{String error="";
+            try{initialize();String canonical=service.callAttr("validate_portable_json",doc.school()).toString();doc.root.put("school",new JSONObject(canonical));BackupStore.apply(context,doc);
+                service.callAttr("import_portable_json",canonical);GoogleCalendarSync.demo(false);writeEnabled=true;storageError="";}
+            catch(Exception failure){error="Import nie został ukończony. Zachowano poprzednią kopię; uruchom aplikację ponownie, jeśli import został przerwany.";}
+            finishBackup(callback,error.isEmpty()?doc:null,error);
+        });
+    }
+
     public void forget() {
         GoogleCalendarSync.disable(context);
         submit(() -> {
             BackgroundSync.enabled(context, false);
             service.callAttr("forget");
-            try { ReminderAlarms.clear(context); store.clear(); storageError = ""; writeEnabled = true; }
+            try { ReminderAlarms.clear(context); new HomeworkStatusStore(context).clear(); store.clear(); storageError = ""; writeEnabled = true; }
             catch (Exception error) { storageError = "Wyczyszczono pamięć, ale nie usunięto pliku danych. Spróbuj ponownie przed zamknięciem aplikacji."; writeEnabled = false; }
         });
     }

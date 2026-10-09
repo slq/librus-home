@@ -15,7 +15,7 @@ import java.util.concurrent.*;
 /** One-way export. Android's Google sync adapter performs the cloud upload. No OAuth secrets. */
 public final class GoogleCalendarSync {
     public static final int JOB_ID=1702;
-    private static final Object LOCK=new Object();
+    static final Object LOCK=new Object();
     private static final ExecutorService WORK=Executors.newSingleThreadExecutor();
     private static volatile boolean demo;
     static android.content.SharedPreferences prefs(Context c){return c.getSharedPreferences("google_calendar_export",Context.MODE_PRIVATE);}
@@ -55,7 +55,9 @@ public final class GoogleCalendarSync {
             if(app.getSystemService(android.app.job.JobScheduler.class).schedule(job)!=android.app.job.JobScheduler.RESULT_SUCCESS)notice(app,"Android nie przyjął zadania zapisu do kalendarza. Otwórz integrację i ponów synchronizację.");
         }catch(Exception failure){notice(app,"Nie udało się zaplanować zapisu do kalendarza. Ponów synchronizację w ustawieniach.");}
         WORK.execute(()->{try{syncStored(app);}finally{if(complete!=null)new android.os.Handler(android.os.Looper.getMainLooper()).post(complete);}});}
-    public static void syncStored(Context c){synchronized(LOCK){
+    public static void syncStored(Context c){
+        try{BackupStore.recover(c);}catch(Exception failure){notice(c,"Nie odtworzono przerwanego importu. Otwórz aplikację przed synchronizacją.");return;}
+        synchronized(LOCK){
         if(!enabled(c)||demo)return;
         if(!permitted(c)){notice(c,"Brak dostępu do kalendarza. Przyznaj zgodę w ustawieniach integracji.");return;}
         try {

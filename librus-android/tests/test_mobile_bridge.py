@@ -52,6 +52,11 @@ class FakeConnector:
 
 
 class MobileTests(unittest.TestCase):
+    def test_state_exposes_snapshot_year_for_account_scoped_local_statuses(self):
+        self.service.demo()
+        self.assertEqual(self.service.tracker.year, self.service.state()["year"])
+        self.assertEqual(self.service.tracker.year, json.loads(self.service.state_json())["year"])
+
     def setUp(self):
         FakeConnector.created = []
         FakeConnector.fail_login = None

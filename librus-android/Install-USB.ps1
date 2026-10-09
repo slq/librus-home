@@ -1,4 +1,4 @@
-param([string]$ApkPath = "$PSScriptRoot/artifacts/LibrusApp-android-0.7.0-debug.apk", [string]$SdkPath = "$PSScriptRoot/.tools/android-sdk")
+param([string]$ApkPath = "$PSScriptRoot/artifacts/LibrusApp-android-0.12.1.apk", [string]$SdkPath = "$PSScriptRoot/.tools/android-sdk")
 $ErrorActionPreference = 'Stop'
 if (-not (Test-Path -LiteralPath $ApkPath)) { throw 'Nie znaleziono APK. Najpierw uruchom Build.ps1.' }
 $adbPath = Join-Path $SdkPath 'platform-tools/adb.exe'

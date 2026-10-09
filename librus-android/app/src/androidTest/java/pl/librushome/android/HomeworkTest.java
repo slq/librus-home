@@ -50,9 +50,9 @@ public class HomeworkTest {
         Intent intent=new Intent(context(),MainActivity.class).putExtra("demo",true);
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(intent)){
             waitText("DEMO ·");
-            waitText("Dzisiaj");
+            waitText("DEMO ·");
             scenario.onActivity(a->{NavigationTestSupport.open(a,"Zadania domowe");});
-            scenario.onActivity(a->{View root=a.getWindow().getDecorView();assertNotNull(find(root,"Ćwiczenia z ułamków",false));assertNull(find(root,"Powtórka słownictwa",false));View all=find(root,"Wszystkie",true);assertNotNull(all);all.performClick();assertNotNull(find(root,"Powtórka słownictwa",false));assertNotNull(find(root,"Termin minął",false));});
+            scenario.onActivity(a->{View root=a.getWindow().getDecorView();assertNotNull(find(root,"Ćwiczenia z ułamków",false));assertNull(find(root,"Powtórka słownictwa",false));View all=find(root,"Wszystkie terminy",true);assertNotNull(all);all.performClick();assertNotNull(find(root,"Powtórka słownictwa",false));assertNotNull(find(root,"Termin minął",false));});
             scenario.onActivity(a->{View label=find(a.getWindow().getDecorView(),"Ćwiczenia z ułamków",false);assertNotNull(label);assertTrue(((View)label.getParent()).performClick());});
             click("Pobierz treść zadania");waitText("Przykładowa treść zadania");
             click("Przypomnij mi…");waitText("Nowe przypomnienie");

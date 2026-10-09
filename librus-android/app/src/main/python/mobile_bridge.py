@@ -12,6 +12,8 @@ import json
 import time
 from librus_shared.connector import LibrusConnector, ConnectorError
 from librus_shared.data import KINDS as DESKTOP_KINDS, LABELS, SnapshotTracker, demo_sections
+from mobile_changes import ChangeJournal
+from mobile_announcements import AnnouncementArchives
 
 KINDS = (*DESKTOP_KINDS, "homework")
 
@@ -21,6 +23,8 @@ class MobileService:
         self.factory, self.clock = factory, clock
         self.client = None
         self.tracker = SnapshotTracker(extra_kinds=("homework",))
+        self.journal = ChangeJournal(self.tracker.year)
+        self.announcement_archives = AnnouncementArchives()
         self.profile = ""
         self.credentials = None
         self.mode = "idle"
@@ -34,12 +38,22 @@ class MobileService:
         self.live_saved = None
 
     def state(self):
+        sections = copy.deepcopy(self.tracker.sections)
+        if self.mode != "demo":
+            self.announcement_archives.decorate(self.profile, sections["announcements"])
         return {"mode": self.mode, "status": self.status,
-                "sections": copy.deepcopy(self.tracker.sections),
+                "sections": sections, "change_feed": self.journal.state(),
                 "updated_at": dict(self.tracker.updated_at), "errors": dict(self.errors),
                 "connected": self.client is not None, "remembered": bool(self.credentials),
                 "needs_login": self.client is None and self.mode != "demo",
-                "retry_after": self.retry_after, "changes": dict(self.last_changes), "profile": self.profile, "auto_login_blocked": self.auto_login_blocked}
+                "retry_after": self.retry_after, "changes": dict(self.last_changes), "profile": self.profile, "year": self.tracker.year, "auto_login_blocked": self.auto_login_blocked}
+
+    def begin_visit(self):
+        self.journal.begin_visit(self.clock())
+        return self.state_json()
+
+    def end_visit(self):
+        self.journal.end_visit()
 
     def state_json(self):
         return json.dumps(self.state(), ensure_ascii=False)
@@ -55,8 +69,33 @@ class MobileService:
         if self.mode == "demo":
             return ""
         return json.dumps({"version": 1, "profile": self.profile,
-                           "credentials": self.credentials, "snapshot": self.tracker.export(),
+                           "credentials": self.credentials, "snapshot": self.tracker.export(), "change_journal": self.journal.export(),
+                           "announcement_archives": self.announcement_archives.export(),
                            "retry_after": self.retry_after, "auto_login_blocked": self.auto_login_blocked}, ensure_ascii=False)
+
+    def portable_json(self):
+        if self.mode == "demo":
+            raise ValueError("Demo is not a portable school account")
+        from mobile_backup import export
+        return export(self.export_json())
+
+    def validate_portable_json(self, raw):
+        from mobile_backup import validate
+        return json.dumps(validate(raw), ensure_ascii=False)
+
+    def import_portable_json(self, raw):
+        # Validate using a separate service before closing the current session.
+        canonical = self.validate_portable_json(raw)
+        candidate = MobileService(factory=self.factory, clock=self.clock)
+        candidate.restore_json(canonical)
+        self.close_client()
+        self.credentials = None
+        self.live_saved = None
+        self.errors = {}
+        self.blocked.clear()
+        self.last_changes = {}
+        self.retry_after = 0
+        return self.restore_json(canonical)
 
     def restore_json(self, raw):
         value = json.loads(raw) if raw else {}
@@ -78,7 +117,12 @@ class MobileService:
         retry = value.get("retry_after", 0)
         if not isinstance(retry, (int, float)) or not 0 <= retry < float("inf"):
             raise ValueError("Invalid retry date")
-        self.tracker, self.profile, self.credentials = tracker, profile, credentials
+        archives = AnnouncementArchives.from_state(value)
+        archives.restore_into(profile, tracker)
+        journal = ChangeJournal(tracker.year, value.get("change_journal"))
+        journal.active = self.journal.active
+        self.tracker, self.profile, self.credentials, self.journal = tracker, profile, credentials, journal
+        self.announcement_archives = archives
         self.auto_login_blocked = blocked
         self.retry_after = max(self.retry_after, retry)
         self.mode = "offline" if tracker.initialized else "idle"
@@ -146,7 +190,15 @@ class MobileService:
                 self.status = "Nie udało się połączyć konta."
             return self.state_json()
         target_profile = self.profile_id(login)
-        self.tracker = SnapshotTracker(previous.get("snapshot"), extra_kinds=("homework",)) if previous and previous.get("profile") == target_profile else SnapshotTracker(extra_kinds=("homework",))
+        same_profile = previous and previous.get("profile") == target_profile
+        active = self.journal.active
+        self.tracker = SnapshotTracker(previous.get("snapshot"), extra_kinds=("homework",)) if same_profile else SnapshotTracker(extra_kinds=("homework",))
+        self.announcement_archives = AnnouncementArchives.from_state(previous or {})
+        self.announcement_archives.restore_into(target_profile, self.tracker)
+        self.journal = ChangeJournal(self.tracker.year, previous.get("change_journal") if same_profile else None)
+        self.journal.active = active
+        if active and not same_profile:
+            self.journal.begin_visit(self.clock())
         self.profile = target_profile
         self.credentials = {"login": login, "password": password} if remember else None
         self.client, self.mode = candidate, "live"
@@ -193,7 +245,13 @@ class MobileService:
             self.publish()
             try:
                 rows = self.client.fetch(kind)
-                changes[kind] = self.tracker.apply(kind, rows)
+                if kind == "announcements":
+                    prepared = self.announcement_archives.prepare(self.profile, rows)
+                    changes[kind] = self.journal.apply(self.tracker, kind, prepared["items"], self.clock())
+                    prepared["updated_at"] = self.tracker.updated_at[kind]
+                    self.announcement_archives.commit(self.profile, prepared, self.tracker)
+                else:
+                    changes[kind] = self.journal.apply(self.tracker, kind, rows, self.clock())
                 self.errors.pop(kind, None)
                 successes += 1
             except ConnectorError as exc:
@@ -285,15 +343,24 @@ class MobileService:
         self.close_client()
         self.credentials = None
         self.tracker = SnapshotTracker(extra_kinds=("homework",))
+        self.journal = ChangeJournal(self.tracker.year)
+        self.announcement_archives = AnnouncementArchives()
         for kind, rows in demo_sections(include_homework=True).items():
             self.tracker.apply(kind, rows)
+        self.journal.begin_visit(self.clock())
+        for kind in ("grades", "schedule", "homework", "announcements", "attendance", "timetable", "messages"):
+            self.journal.record(kind, self.tracker.sections[kind][0], "new", self.clock())
         self.mode, self.errors = "demo", {}
         self.status = "Dane demonstracyjne — bez połączenia z Librusem."
         return self.state_json()
 
     def forget(self):
+        active = self.journal.active
         self.close_client()
         self.tracker = SnapshotTracker(extra_kinds=("homework",))
+        self.journal = ChangeJournal(self.tracker.year)
+        self.journal.active = active
+        self.announcement_archives = AnnouncementArchives()
         self.profile, self.credentials, self.live_saved = "", None, None
         self.auto_login_blocked = False
         self.mode, self.errors, self.blocked = "idle", {}, set()

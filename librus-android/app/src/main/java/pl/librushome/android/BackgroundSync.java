@@ -10,7 +10,7 @@ public final class BackgroundSync {
     static final long FLEX_MS = TimeUnit.MINUTES.toMillis(5);
     public static boolean enabled(Context c) { return c.getSharedPreferences("notification_options", Context.MODE_PRIVATE).getBoolean("background", false); }
     public static void enabled(Context c, boolean value) {
-        c.getSharedPreferences("notification_options", Context.MODE_PRIVATE).edit().putBoolean("background", value).apply();
+        c.getSharedPreferences("notification_options", Context.MODE_PRIVATE).edit().putBoolean("background", value).remove("resume_background_after_login").apply();
         configure(c, value);
     }
     public static int intervalMinutes(Context c) {

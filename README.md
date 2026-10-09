@@ -2,11 +2,11 @@
 
 Repozytorium aplikacji **LibrusApp** do konta LIBRUS Synergia: wersji desktopowej dla Windows oraz mobilnej dla Androida. Obie pokazują dane dziennika i przechowują zaszyfrowaną kopię na urządzeniu.
 
-Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Wersja desktopowa: **0.1.1**, Android: **0.7.0**. Status: prototypy rozwijane i sprawdzane lokalnie.
+Projekt jest niezależnym, nieoficjalnym klientem. Nie jest powiązany z producentem Librusa. Wersja desktopowa: **0.1.1**, Android: **0.12.1**. Status: prototypy rozwijane i sprawdzane lokalnie.
 
 ## Możliwości
 
-Repozytorium zawiera dwie aplikacje: [LibrusApp dla Windows](librus-app/README.md) i [LibrusApp dla Androida](librus-android/README.md). Wersja Android ma APK do instalacji przez USB, z logowaniem, odczytem danych po otwarciu, limitem 5 minut, lokalnymi przypomnieniami, zadaniami domowymi i opcjonalnymi powiadomieniami. Od 0.7.0 ma ekran Start „Dzisiaj / Jutro” i dolne menu z pozostałymi panelami pod Więcej. Jej [zakres pierwszej wersji](librus-android/MVP_SCOPE.md) opisuje adaptację wymagań desktopu.
+Repozytorium zawiera dwie aplikacje: [LibrusApp dla Windows](librus-app/README.md) i [LibrusApp dla Androida](librus-android/README.md). Wersja Android ma APK do instalacji przez USB, z logowaniem, odczytem danych po otwarciu, limitem 5 minut, lokalnymi przypomnieniami, zadaniami domowymi i opcjonalnymi powiadomieniami. Od 0.12.1 ma wbudowany aktualizator APK z GitHub Releases, opis zmian i instalację z potwierdzeniem Androida. Od 0.11.0 zachowuje pobrane ogłoszenia w zaszyfrowanym archiwum konta, także po ich zniknięciu z Librusa i zmianie roku. Od 0.10.0 ma wspólną wyszukiwarkę wszystkich pobranych sekcji i własnych przypomnień, dostępną ze Startu i Więcej. Od 0.9.0 pokazuje na Starcie nowe i zmienione wpisy od poprzedniego wejścia, także pobrane w tle. Od 0.8.0 pozwala oznaczać zadania jako zrobione i cofać ten lokalny status. Od 0.7.0 ma ekran Start „Dzisiaj / Jutro” i dolne menu z pozostałymi panelami pod Więcej. Jej [zakres pierwszej wersji](librus-android/MVP_SCOPE.md) opisuje adaptację wymagań desktopu.
 
 - Oceny, wiadomości, ogłoszenia, frekwencja i plan lekcji.
 - Terminarz w widoku kalendarza z listą poniżej lub samej listy.

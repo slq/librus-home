@@ -55,7 +55,7 @@ public class CalendarTest {
         JSONObject reminder=store.save(null,"homework","demo:homework:h2","demo",true,"SYNTHETIC_SOURCE",NOTE,ReminderStore.localTime(day,LocalTime.of(18,0),ZoneId.systemDefault()),false,now);
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(new Intent(c,MainActivity.class).putExtra("demo",true))) {
             waitText("DEMO ·");
-            scenario.onActivity(a->{View root=a.getWindow().getDecorView();assertNotNull(find(root,"Więcej",true));assertNotNull(find(root,"Zadania",true));find(root,"Kalendarz",true).performClick();});
+            scenario.onActivity(a->{View root=a.getWindow().getDecorView();assertNotNull(find(root,"Więcej",true));assertNotNull(find(root,"Ogłoszenia",true));assertNull(find(root,"Zadania",true));find(root,"Kalendarz",true).performClick();});
             waitText("Pokaż w kalendarzu");
             if(!YearMonth.from(day).equals(YearMonth.now()))scenario.onActivity(a->find(a.getWindow().getDecorView(),"›",true).performClick());
             waitText(NOTE);

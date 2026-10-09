@@ -8,12 +8,14 @@ public final class ReminderReceiver extends BroadcastReceiver {
         PendingResult pending = goAsync();
         ReminderAlarms.execute(() -> {
             try {
+                BackupStore.recover(app);
                 if ("pl.librushome.android.REMIND".equals(intent.getAction())) ReminderAlarms.fire(app, intent.getStringExtra("id"));
                 else if ("pl.librushome.android.SNOOZE".equals(intent.getAction()))
                     ReminderAlarms.snooze(app, intent.getStringExtra("id"), intent.getLongExtra("fired_at", -1), intent.getLongExtra("due", -1));
-                else { ReminderAlarms.restore(app); GoogleCalendarSync.request(app,null); }
+                else { if(Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()))UpdateManager.configure(app); ReminderAlarms.restore(app); GoogleCalendarSync.request(app,null); }
                 NotificationHub.error(app, "");
                 if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+                    UpdateManager.configure(app);
                     try { BackgroundSync.configure(app, BackgroundSync.enabled(app)); }
                     catch (Exception syncFailure) {
                         NotificationHub.error(app, "Nie udało się odtworzyć pobierania w tle po aktualizacji. Sprawdź ustawienia aplikacji.");

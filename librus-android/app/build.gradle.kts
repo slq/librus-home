@@ -9,8 +9,8 @@ android {
         applicationId = "pl.librushome.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.7.0"
+        versionCode = providers.gradleProperty("librusVersionCode").orElse("19").get().toInt()
+        versionName = providers.gradleProperty("librusVersionName").orElse("0.12.1").get()
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -18,8 +18,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    sourceSets.getByName("androidTest").assets.srcDir(rootProject.file(".tools/update-test-assets"))
     buildTypes {
-        getByName("release") { isMinifyEnabled = false }
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug") // Retain the existing local certificate: no data-destructive reinstall.
+        }
     }
 }
 chaquopy {
